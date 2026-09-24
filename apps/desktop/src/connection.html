@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>NetDental</title>
+    <link rel="stylesheet" href="connection.css" />
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">+</div>
+      <p id="brand"></p>
+      <h1 id="title"></h1>
+      <p id="description" role="status"></p>
+      <button id="retry"></button
+      ><label id="language-label" for="language"></label
+      ><select id="language">
+        <option value="en">English</option>
+        <option value="fr">Français</option>
+      </select>
+    </main>
+    <script src="connection.cjs"></script>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+body {
+  margin: 0;
+  background: #f5f8f7;
+  color: #203e38;
+  font:
+    16px/1.6 "Segoe UI",
+    sans-serif;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+main {
+  max-width: 480px;
+  padding: 48px;
+  background: white;
+  border: 1px solid #dce7e3;
+  border-radius: 20px;
+  text-align: center;
+}
+.mark {
+  font-size: 32px;
+  color: #147d70;
+}
+h1 {
+  font-size: 26px;
+}
+p {
+  color: #60736d;
+}
+button,
+select {
+  font: inherit;
+  border-radius: 8px;
+  padding: 12px 18px;
+  border: 1px solid #c7d8d2;
+}
+button {
+  display: block;
+  margin: 24px auto;
+  background: #147d70;
+  color: white;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.6;
+}
+label {
+  display: block;
+  margin-top: 28px;
+}
+button:focus-visible,
+select:focus-visible {
+  outline: 3px solid #5fae9e;
+  outline-offset: 4px;
+}

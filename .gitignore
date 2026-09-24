@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+.env
+.env.*
+!.env.example
+coverage/
+test-results/
+test-artifacts/
+playwright-report/
+*.log
+.runtime/

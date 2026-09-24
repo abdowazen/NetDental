@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+  DENTIST
+  ASSISTANT
+  RECEPTIONIST
+  ADMIN
+}
+enum Language {
+  en
+  fr
+}
+model User {
+  id String @id @default(uuid())
+  username String @unique @db.VarChar(64)
+  passwordHash String
+  displayName String @db.VarChar(100)
+  role Role @default(DENTIST)
+  preferredLanguage Language @default(en)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+  permissions ScreenPermission[]
+  assignments RoomAssignment[]
+}
+model Session {
+  id String @id @default(uuid())
+  userId String
+  tokenHash String @unique @db.Char(64)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum Currency {
+  USD
+  LBP
+}
+
+model CurrencySettings {
+  id Int @id @default(1)
+  baseCurrency Currency @default(USD)
+  updatedAt DateTime @updatedAt
+}
+
+model ExchangeRate {
+  date DateTime @db.Date
+  roomId Int @default(1)
+  room SurgicalRoom @relation(fields: [roomId], references: [id])
+  lbpPerUsd Decimal @db.Decimal(18, 6)
+  updatedAt DateTime @updatedAt
+  @@id([roomId, date])
+}
+
+model Patient {
+  treatmentPlans TreatmentPlan[]
+  chart PatientChart?
+  clinicalRecords ClinicalRecord[]
+  treatments Treatment[]
+  roomId Int @default(1)
+  room SurgicalRoom @relation(fields: [roomId], references: [id])
+  id Int @id @default(autoincrement())
+  firstName String @db.VarChar(100)
+  lastName String @db.VarChar(100)
+  fullName String @db.VarChar(201)
+  phone String @db.VarChar(40)
+  gender String @db.VarChar(6)
+  fatherName String @default("") @db.VarChar(100)
+  job String @default("none") @db.VarChar(20)
+  age Int @default(0)
+  firstVisit DateTime @db.Date
+  notes String @default("") @db.VarChar(4000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Clinic {
+  id Int @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+  rooms SurgicalRoom[]
+}
+model SurgicalRoom {
+  id Int @id @default(autoincrement())
+  name String @db.VarChar(100)
+  clinicId Int
+  clinic Clinic @relation(fields: [clinicId], references: [id])
+  assignments RoomAssignment[]
+  patients Patient[]
+  procedures Procedure[]
+  rates ExchangeRate[]
+  @@unique([clinicId, name])
+}
+model RoomAssignment {
+  userId String
+  roomId Int
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room SurgicalRoom @relation(fields: [roomId], references: [id])
+  @@id([userId, roomId])
+}
+model ScreenPermission {
+  userId String
+  screen String @db.VarChar(40)
+  view Boolean @default(false)
+  create Boolean @default(false)
+  modify Boolean @default(false)
+  delete Boolean @default(false)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([userId, screen])
+}
+
+model Procedure {
+  treatments Treatment[]
+  id Int @id @default(autoincrement())
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id])
+  code String @db.VarChar(40)
+  name String @db.VarChar(150)
+  category String @db.VarChar(40)
+  description String @default("") @db.VarChar(4000)
+  defaultPrice Decimal @db.Decimal(12, 2)
+  dentition String @db.VarChar(20)
+  scope String @db.VarChar(20)
+  requiresLab Boolean @default(false)
+  chartIndicator String @default("generic") @db.VarChar(30)
+  active Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([roomId, code])
+  @@index([roomId, id])
+}
+
+model PatientChart {
+  patientId Int @id
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  dentition String @db.VarChar(12)
+  updatedAt DateTime @updatedAt
+}
+
+model ClinicalRecord {
+  @@index([planId])
+  planId String? @db.Uuid
+  plan TreatmentPlan? @relation(fields: [planId, patientId], references: [id, patientId], onDelete: Restrict)
+  id String @id @default(uuid()) @db.Uuid
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  kind String @db.VarChar(12)
+  data Json
+  date DateTime @db.Date
+  actorId String
+  recordedAt DateTime @default(now())
+  voidReason String?
+  voidDate DateTime? @db.Date
+  voidActorId String?
+  @@index([patientId, kind, date])
+}
+
+model Treatment {
+  discountType String @default("amount") @db.VarChar(8)
+  discountValue Decimal @default(0) @db.Decimal(12, 2)
+  @@index([planId])
+  planId String? @db.Uuid
+  plan TreatmentPlan? @relation(fields: [planId, patientId], references: [id, patientId], onDelete: Restrict)
+  id String @id @default(uuid()) @db.Uuid
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  procedureId Int
+  procedure Procedure @relation(fields: [procedureId], references: [id], onDelete: Restrict)
+  snapshot Json
+  price Decimal @db.Decimal(12, 2)
+  currency String @default("USD") @db.VarChar(3)
+  date DateTime @db.Date
+  notes String
+  status String @default("planned") @db.VarChar(16)
+  version Int @default(1)
+  voidReason String?
+  replacesId String? @db.Uuid
+  replaces Treatment? @relation("TreatmentCorrection", fields: [replacesId], references: [id], onDelete: Restrict)
+  corrections Treatment[] @relation("TreatmentCorrection")
+  teeth TreatmentTooth[]
+  events TreatmentEvent[]
+  createdAt DateTime @default(now())
+  @@index([patientId, date])
+}
+model TreatmentTooth {
+  treatmentId String @db.Uuid
+  treatment Treatment @relation(fields: [treatmentId], references: [id], onDelete: Restrict)
+  tooth Int
+  surfaces String[]
+  role String @db.VarChar(12)
+  @@id([treatmentId, tooth])
+}
+model TreatmentEvent {
+  id String @id @default(uuid()) @db.Uuid
+  treatmentId String @db.Uuid
+  treatment Treatment @relation(fields: [treatmentId], references: [id], onDelete: Restrict)
+  status String @db.VarChar(16)
+  date DateTime @db.Date
+  notes String
+  actorId String
+  recordedAt DateTime @default(now())
+  @@index([treatmentId, recordedAt])
+}
+
+model TreatmentPlan {
+  id String @id @default(uuid()) @db.Uuid
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  number Int
+  createdAt DateTime @default(now())
+  actorId String?
+  treatments Treatment[]
+  totals ClinicalRecord[]
+  @@unique([patientId, number])
+  @@unique([id, patientId])
+}

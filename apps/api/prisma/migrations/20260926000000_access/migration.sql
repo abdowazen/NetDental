@@ -1,0 +1,17 @@
+ALTER TYPE "Role" ADD VALUE 'ADMIN';
+CREATE TABLE "Clinic" ("id" SERIAL PRIMARY KEY, "name" VARCHAR(100) NOT NULL UNIQUE);
+CREATE TABLE "SurgicalRoom" ("id" SERIAL PRIMARY KEY, "name" VARCHAR(100) NOT NULL, "clinicId" INTEGER NOT NULL REFERENCES "Clinic"("id"), UNIQUE("clinicId", "name"));
+INSERT INTO "Clinic" ("name") VALUES ('Main Clinic');
+INSERT INTO "SurgicalRoom" ("name", "clinicId") VALUES ('Room 1', 1);
+CREATE TABLE "RoomAssignment" ("userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE, "roomId" INTEGER NOT NULL REFERENCES "SurgicalRoom"("id"), PRIMARY KEY("userId", "roomId"));
+CREATE TABLE "ScreenPermission" ("userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE, "screen" VARCHAR(40) NOT NULL, "view" BOOLEAN NOT NULL DEFAULT false, "create" BOOLEAN NOT NULL DEFAULT false, "modify" BOOLEAN NOT NULL DEFAULT false, "delete" BOOLEAN NOT NULL DEFAULT false, PRIMARY KEY("userId", "screen"), CHECK ("view" OR NOT ("create" OR "modify" OR "delete")));
+INSERT INTO "RoomAssignment" ("userId", "roomId") SELECT "id", 1 FROM "User";
+INSERT INTO "ScreenPermission" ("userId", "screen", "view", "create", "modify", "delete") SELECT "id", screen, true, true, true, true FROM "User" CROSS JOIN unnest(ARRAY['dashboard','patients','treatment','actsProcedures','reportsListing','billsCategories','payments','reportsAnalytics','purchaseInvoice','suppliesMaterials','suppliersVendors','settings']) AS screen;
+ALTER TABLE "Patient" ADD COLUMN "roomId" INTEGER NOT NULL DEFAULT 1 REFERENCES "SurgicalRoom"("id");
+CREATE INDEX "Patient_room_id" ON "Patient" ("roomId", "id");
+CREATE INDEX "Patient_room_visit" ON "Patient" ("roomId", "firstVisit", "id");
+ALTER TABLE "ExchangeRate" ADD COLUMN "roomId" INTEGER NOT NULL DEFAULT 1 REFERENCES "SurgicalRoom"("id");
+ALTER TABLE "ExchangeRate" DROP CONSTRAINT "ExchangeRate_pkey";
+ALTER TABLE "ExchangeRate" ADD PRIMARY KEY ("roomId", "date");
+ALTER TABLE "CurrencySettings" DROP CONSTRAINT "CurrencySettings_singleton";
+ALTER TABLE "CurrencySettings" ADD CONSTRAINT "CurrencySettings_room" FOREIGN KEY ("id") REFERENCES "SurgicalRoom"("id");

@@ -1,0 +1,15 @@
+{
+  "name": "@clinic/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit false --outDir dist",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  }
+}
