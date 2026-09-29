@@ -27,12 +27,20 @@ import {
   selectExchangeRate,
   type ErrorCode,
   type User,
+  dashboardPeriodSchema,
+  newPatientReportQuerySchema,
+  clientSystemLogSchema,
+  systemLogQuerySchema,
 } from "@clinic/shared";
 import type { User as DbUser } from "@prisma/client";
 import type { Config } from "./config.js";
 import { databaseAccessError } from "./access.js";
 import type { Store } from "./store.js";
 import { registerOdontogram } from "./odontogram-routes.js";
+import { registerPayments } from "./payment-routes.js";
+import { registerLaboratory } from "./laboratory-routes.js";
+import { registerPatientFiles } from "./patient-file-routes.js";
+import { resolve } from "node:path";
 
 export const passwordOptions = {
   type: argon2id,
@@ -98,7 +106,7 @@ export async function buildApp(store: Store, config: Config) {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
-        imgSrc: ["'self'", "data:"],
+        imgSrc: ["'self'", "data:", "blob:"],
         connectSrc: ["'self'"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
@@ -114,6 +122,7 @@ export async function buildApp(store: Store, config: Config) {
     global: false,
     errorResponseBuilder: () => new ApiError("RATE_LIMITED", 429),
   });
+  app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_req, body, done) => done(null, body));
   app.addHook("onRequest", async (req, reply) => {
     reply.header("Cache-Control", "no-store");
     if (
@@ -123,7 +132,7 @@ export async function buildApp(store: Store, config: Config) {
     )
       throw new ApiError("FORBIDDEN", 403);
   });
-  app.setErrorHandler((error, _req, reply) => {
+  app.setErrorHandler(async (error, req, reply) => {
     if (error instanceof ApiError)
       return reply
         .status(error.statusCode)
@@ -149,7 +158,29 @@ export async function buildApp(store: Store, config: Config) {
       return reply.status(400).send({ error: { code: "VALIDATION_ERROR" } });
     if (status === 429)
       return reply.status(429).send({ error: { code: "RATE_LIMITED" } });
-    // Do not log Prisma/connection errors: their messages may contain connection details.
+    let userId: string | null = null;
+    try {
+      const token = req.cookies[cookieName];
+      if (token && /^[a-f0-9]{64}$/.test(token))
+        userId = (await store.findSession(digest(token)))?.userId ?? null;
+    } catch {
+      // Logging must never hide the original failure.
+    }
+    const rawCode = (error as { code?: unknown }).code;
+    const rawName = (error as { name?: unknown }).name;
+    const code = (typeof rawCode === "string" ? rawCode : typeof rawName === "string" ? rawName : "REQUEST_FAILED")
+      .replace(/[^a-zA-Z0-9_.-]/g, "_")
+      .slice(0, 80);
+    await store.recordSystemLog?.({
+      level: "error",
+      source: "api",
+      code,
+      message: "Unexpected server error",
+      method: req.method.slice(0, 10),
+      path: req.url.split("?")[0].slice(0, 300),
+      userId,
+    }).catch(() => undefined);
+    // Do not log raw exception messages: they may contain credentials or patient data.
     app.log.error({ code: "REQUEST_FAILED" }, "Request failed");
     return reply.status(503).send({ error: { code: "SERVICE_UNAVAILABLE" } });
   });
@@ -193,6 +224,29 @@ export async function buildApp(store: Store, config: Config) {
     requireRole(user, ["ADMIN"]);
     return user;
   }
+  app.get("/api/admin/system-logs", async (req) => {
+    await administrator(req);
+    const input = systemLogQuerySchema.parse(req.query);
+    return store.listSystemLogs?.(input) ?? { logs: [], total: 0 };
+  });
+  app.post(
+    "/api/system-logs/client",
+    { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      const user = await authenticated(req);
+      const input = clientSystemLogSchema.parse(req.body);
+      await store.recordSystemLog?.({
+        level: "error",
+        source: "client",
+        code: input.code,
+        message: input.message,
+        method: "CLIENT",
+        path: input.path,
+        userId: user.id,
+      });
+      return reply.status(201).send({ recorded: true });
+    },
+  );
   app.get("/api/admin/users", async (req) => {
     await administrator(req);
     return { users: await store.listManagedUsers() };
@@ -325,6 +379,27 @@ export async function buildApp(store: Store, config: Config) {
     roomId: await scoped(req, "treatment", action),
     actorId: (await authenticated(req)).id,
   }));
+  registerPayments(app, store, async (req, action) => ({
+    roomId: await scoped(req, "payments", action),
+    actorId: (await authenticated(req)).id,
+  }));
+  registerLaboratory(app, store, async (req, action) => ({
+    roomId: await scoped(req, "treatment", action),
+    actorId: (await authenticated(req)).id,
+  }));
+  registerPatientFiles(app, store, config.PATIENT_FILES_DIR ?? resolve("data/patient-files"), async (req, action) => ({
+    roomId: await scoped(req, "treatment", action),
+    actorId: (await authenticated(req)).id,
+  }));
+  app.get("/api/dashboard", async (req) => {
+    const roomId = await scoped(req, "dashboard", "view");
+    const period = dashboardPeriodSchema.parse((req.query as { period?: string }).period ?? "monthly");
+    return store.getDashboard(roomId, period);
+  });
+  app.get("/api/reports/new-patients", async (req) => {
+    const roomId = await scoped(req, "reportsListing", "view");
+    return store.getNewPatientsReport(newPatientReportQuerySchema.parse(req.query), roomId);
+  });
   app.get("/api/procedures", async (req) => {
     const roomId = await scoped(req, "actsProcedures", "view");
     return store.searchProcedures(procedureSearchSchema.parse(req.query), roomId);
@@ -419,6 +494,21 @@ export async function buildApp(store: Store, config: Config) {
       effectiveRate: selectExchangeRate(rates, today),
     };
   });
+  app.get("/api/base-currency", async (req) => {
+    const user = await userWithAccess(await authenticated(req));
+    const raw = req.headers["x-clinic-room"];
+    const roomId =
+      typeof raw === "string" && /^\d+$/.test(raw)
+        ? Number(raw)
+        : user.access!.rooms.length === 1
+          ? user.access!.rooms[0].id
+          : NaN;
+    if (!Number.isSafeInteger(roomId))
+      throw new ApiError("LOCATION_REQUIRED", 400);
+    if (!user.access!.rooms.some((room) => room.id === roomId))
+      throw new ApiError("FORBIDDEN", 403);
+    return { baseCurrency: await store.getBaseCurrency(roomId) };
+  });
   app.patch("/currencies", async (req) => {
     const roomId = await scoped(req, "settings", "modify");
     const { baseCurrency } = currencySettingsSchema.parse(req.body);
@@ -457,7 +547,7 @@ export async function buildApp(store: Store, config: Config) {
     app.setNotFoundHandler((req, reply) => {
       if (
         req.method === "GET" &&
-        (["/", "/login", "/dashboard", "/settings", "/admin", "/treatment"].includes(
+        (["/", "/login", "/dashboard", "/settings", "/settings/general", "/settings/currency", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/new-patients", "/treatment"].includes(
           req.url.split("?")[0],
         ) ||
           /^\/(?:patients|procedures)(?:\/(?:new|\d+))?$/.test(req.url.split("?")[0]))

@@ -1,4 +1,4 @@
-# NetDental
+# NetDenty
 
 A Windows-first Electron application with a React/TypeScript renderer and a shared Fastify/PostgreSQL API. Includes authentication, patient registration, a dentist workspace, English/French translations, appearance preferences, and currency settings.
 
@@ -48,7 +48,7 @@ For browser hot reload, run `npm run api:start` and `npm run dev:web` in separat
 | `DENTIST_USERNAME`, `DENTIST_DISPLAY_NAME`, `DENTIST_PASSWORD`, `DENTIST_LANGUAGE` | Optional CLI provisioning environment input; language defaults to `en`. Supply secrets through a secure deployment environment, clear them afterward, and avoid shell-history literals. |
 | `TEST_DATABASE_URL`                                                                | Optional dedicated disposable PostgreSQL database for integration tests.                                                                                                                |
 
-Development reads `.env` at repository root. Packaged Electron reads `%APPDATA%\Dental Clinic\desktop.env` (the existing profile directory, retained for compatibility after the NetDental rename). Environment variables override file values. Restrict filesystem access to this file when it holds a local database password. No database configuration is passed to the renderer.
+Development reads `.env` at repository root. Packaged Electron reads `%APPDATA%\Dental Clinic\desktop.env` (the existing profile directory, retained so upgrades to NetDenty keep their configuration). Environment variables override file values. Restrict filesystem access to this file when it holds a local database password. No database configuration is passed to the renderer.
 
 ## Currency settings
 
@@ -142,14 +142,14 @@ npm run test:integration
 
 This command applies migrations to the explicitly selected database, creates a unique test dentist and removes that account afterward. It does not reset or drop databases.
 
-With that same test database configured, `npm run test:desktop` launches Electron with an isolated profile and verifies login, refresh, navigation, language persistence, logout, connection retry/recovery, and LOCAL/REMOTE process ownership. It creates and removes its own test account. To run it against the packaged executable, set `TEST_DESKTOP_EXE` to `release/win-unpacked/NetDental.exe`. Screenshots are saved under the ignored `.runtime/` folder. The test uses loopback ports 14310 and 14311, which must be free.
+With that same test database configured, `npm run test:desktop` launches Electron with an isolated profile and verifies login, refresh, navigation, language persistence, logout, connection retry/recovery, and LOCAL/REMOTE process ownership. It creates and removes its own test account. To run it against the packaged executable, set `TEST_DESKTOP_EXE` to `release/win-unpacked/NetDenty.exe`. Screenshots are saved under the ignored `.runtime/` folder. The test uses loopback ports 14310 and 14311, which must be free.
 
 ```powershell
 npm run desktop:unpacked
 npm run desktop:package
 ```
 
-Build on Windows x64. The installer is written under `release/`; the unpacked application is `release/win-unpacked/NetDental.exe`. Staging includes compiled API JavaScript, production dependencies, Argon2 native assets, generated Prisma client/Windows engine, and the built renderer. PostgreSQL is not bundled. The current development installer is unsigned; production distribution needs your organization's Windows signing setup. Building an installer is distinct from installing/testing it; see `VERIFICATION.md` for checks actually performed in this environment.
+Build on Windows x64. The installer is written under `release/`; the unpacked application is `release/win-unpacked/NetDenty.exe`. Staging includes compiled API JavaScript, production dependencies, Argon2 native assets, generated Prisma client/Windows engine, and the built renderer. PostgreSQL is not bundled. The current development installer is unsigned; production distribution needs your organization's Windows signing setup. Building an installer is distinct from installing/testing it; see `VERIFICATION.md` for checks actually performed in this environment.
 
 The lockfile is included for reproducible workspace installation. Package upgrades should be checked together with `npm ci`, lint/type checks, tests, builds, and a packaged runtime smoke test.
 

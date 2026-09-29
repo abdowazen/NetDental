@@ -44,7 +44,7 @@ export function allowed(
   return Boolean(permission?.view && permission[action]);
 }
 export function landingPath(user: { role: string; access?: Access } | null) {
-  if (user?.role === "ADMIN") return "/admin";
+  if (user?.role === "ADMIN") return "/admin/users";
   return allowed(user, "dashboard")
     ? "/dashboard"
     : allowed(user, "patients")
@@ -53,6 +53,8 @@ export function landingPath(user: { role: string; access?: Access } | null) {
         ? "/treatment"
       : allowed(user, "actsProcedures")
         ? "/procedures"
+      : allowed(user, "reportsListing")
+        ? "/reports/new-patients"
       : allowed(user, "settings")
         ? "/settings"
         : "/dashboard";

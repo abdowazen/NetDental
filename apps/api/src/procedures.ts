@@ -9,6 +9,9 @@ function publicProcedure(row: Row): Procedure {
     dentition: row.dentition as Procedure["dentition"],
     scope: row.scope as Procedure["scope"],
     requiresLab: row.requiresLab,
+    labLaboratory: row.labLaboratory,
+    labDefaultCost: row.labDefaultCost.toFixed(2), labTurnaroundDays: row.labTurnaroundDays,
+    labMaterial: row.labMaterial, labShade: row.labShade, labInstructions: row.labInstructions,
     chartIndicator: row.chartIndicator as Procedure["chartIndicator"],
     active: row.active,
   };

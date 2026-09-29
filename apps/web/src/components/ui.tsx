@@ -5,19 +5,18 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, WifiOff, LoaderCircle } from "lucide-react";
+import { WifiOff, LoaderCircle } from "lucide-react";
 export function Brand({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-3">
-      <span className="brand-mark">
-        <Activity size={25} strokeWidth={1.7} />
-      </span>
-      {!compact && (
-        <span className="text-lg font-semibold tracking-tight">
-          {t("appName")}
-        </span>
-      )}
+    <div
+      className={`brand-logo-shell ${compact ? "brand-logo-shell-compact" : ""}`}
+    >
+      <span
+        className={`brand-logo-graphic ${compact ? "brand-logo-mark" : "brand-logo-full"}`}
+        role="img"
+        aria-label={t("appName")}
+      />
     </div>
   );
 }

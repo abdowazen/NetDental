@@ -21,3 +21,4 @@ await cp("../web/src/locales/en.json", "dist/locales/en.json");
 await cp("../web/src/locales/fr.json", "dist/locales/fr.json");
 await cp("src/connection.html", "dist/connection.html");
 await cp("src/connection.css", "dist/connection.css");
+await cp("src/assets", "dist/assets", { recursive: true });

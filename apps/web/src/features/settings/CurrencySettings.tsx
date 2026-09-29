@@ -30,13 +30,22 @@ export function CurrencySettings() {
   const [validationError, setValidationError] = useState(false);
   const [amount, setAmount] = useState("1");
   const [from, setFrom] = useState<Currency>("USD");
+  const refreshCurrencyAmounts = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["currencies"] }),
+      client.invalidateQueries({ queryKey: ["base-currency"] }),
+      client.invalidateQueries({ queryKey: ["payments"] }),
+      client.invalidateQueries({ queryKey: ["dashboard"] }),
+      client.invalidateQueries({ queryKey: ["odontogram"] }),
+    ]);
+  };
   const baseMutation = useMutation({
     mutationFn: (baseCurrency: Currency) =>
       api("/currencies", {
         method: "PATCH",
         body: JSON.stringify({ baseCurrency }),
       }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["currencies"] }),
+    onSuccess: refreshCurrencyAmounts,
   });
   const rateMutation = useMutation({
     mutationFn: () =>
@@ -44,7 +53,7 @@ export function CurrencySettings() {
         method: "PUT",
         body: JSON.stringify({ date, lbpPerUsd: rate.trim() }),
       }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["currencies"] }),
+    onSuccess: refreshCurrencyAmounts,
   });
   const data = query.data;
   const effective = data?.effectiveRate;

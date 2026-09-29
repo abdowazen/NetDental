@@ -12,7 +12,7 @@ import {
 import { api, errorKey } from "../../lib/api";
 import { Button, ErrorMessage } from "../../components/ui";
 
-export function AdminPage() {
+export function UsersAdminPage() {
   const { t } = useTranslation();
   const client = useQueryClient();
   const [selected, setSelected] = useState<ManagedUser | null | undefined>(
@@ -34,13 +34,13 @@ export function AdminPage() {
   }
   return (
     <>
-      <h2 className="mb-6 text-3xl font-semibold">{t("administration")}</h2>
+      <p className="eyebrow">{t("administration")}</p>
+      <h2 className="mb-6 mt-3 text-3xl font-semibold">{t("manageUsers")}</h2>
       {(users.error || clinics.error) && (
         <ErrorMessage message={t(errorKey(users.error ?? clinics.error))} />
       )}
       <section className="card p-6">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-xl font-semibold">{t("manageUsers")}</h3>
+        <div className="flex items-center justify-end gap-3">
           <Button onClick={() => setSelected(null)}>{t("newUser")}</Button>
         </div>
         {users.isPending && <p role="status">{t("loading")}</p>}
@@ -96,8 +96,29 @@ export function AdminPage() {
           }}
         />
       )}
-      <section className="card mt-6 p-6">
-        <h3 className="mb-4 text-xl font-semibold">{t("clinicsRooms")}</h3>
+    </>
+  );
+}
+
+export function ClinicsRoomsAdminPage() {
+  const { t } = useTranslation();
+  const client = useQueryClient();
+  const clinics = useQuery({
+    queryKey: ["admin", "clinics"],
+    queryFn: () => api<{ clinics: Clinic[] }>("/api/admin/clinics"),
+  });
+  async function refresh() {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["admin", "clinics"] }),
+      client.invalidateQueries({ queryKey: ["session"] }),
+    ]);
+  }
+  return (
+    <>
+      <p className="eyebrow">{t("administration")}</p>
+      <h2 className="mb-6 mt-3 text-3xl font-semibold">{t("clinicsRooms")}</h2>
+      {clinics.error && <ErrorMessage message={t(errorKey(clinics.error))} />}
+      <section className="card p-6">
         <LocationForm
           path="/api/admin/clinics"
           label={t("newClinic")}

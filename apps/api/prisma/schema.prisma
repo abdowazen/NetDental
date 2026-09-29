@@ -29,6 +29,10 @@ model User {
   sessions Session[]
   permissions ScreenPermission[]
   assignments RoomAssignment[]
+  payments Payment[]
+  labRequestsCreated LabRequest[] @relation("LabRequestCreatedBy")
+  labRequestEvents LabRequestEvent[] @relation("LabRequestEventActor")
+  patientFilesUploaded PatientFile[] @relation("PatientFileUploadedBy")
 }
 model Session {
   id String @id @default(uuid())
@@ -39,6 +43,20 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
   @@index([expiresAt])
+}
+
+model SystemLog {
+  id String @id @default(uuid()) @db.Uuid
+  level String @db.VarChar(10)
+  source String @db.VarChar(12)
+  code String @db.VarChar(80)
+  message String @db.VarChar(500)
+  method String @default("") @db.VarChar(10)
+  path String @default("") @db.VarChar(300)
+  userId String? @db.Uuid
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([source, createdAt])
 }
 
 enum Currency {
@@ -66,6 +84,9 @@ model Patient {
   chart PatientChart?
   clinicalRecords ClinicalRecord[]
   treatments Treatment[]
+  payments Payment[]
+  labRequests LabRequest[]
+  files PatientFile[]
   roomId Int @default(1)
   room SurgicalRoom @relation(fields: [roomId], references: [id])
   id Int @id @default(autoincrement())
@@ -97,6 +118,9 @@ model SurgicalRoom {
   patients Patient[]
   procedures Procedure[]
   rates ExchangeRate[]
+  payments Payment[]
+  labRequests LabRequest[]
+  files PatientFile[]
   @@unique([clinicId, name])
 }
 model RoomAssignment {
@@ -130,6 +154,12 @@ model Procedure {
   dentition String @db.VarChar(20)
   scope String @db.VarChar(20)
   requiresLab Boolean @default(false)
+  labLaboratory String @default("") @db.VarChar(150)
+  labDefaultCost Decimal @default(0) @db.Decimal(12, 2)
+  labTurnaroundDays Int @default(0)
+  labMaterial String @default("") @db.VarChar(100)
+  labShade String @default("") @db.VarChar(40)
+  labInstructions String @default("") @db.VarChar(2000)
   chartIndicator String @default("generic") @db.VarChar(30)
   active Boolean @default(true)
   createdAt DateTime @default(now())
@@ -187,8 +217,48 @@ model Treatment {
   corrections Treatment[] @relation("TreatmentCorrection")
   teeth TreatmentTooth[]
   events TreatmentEvent[]
+  labRequest LabRequest?
   createdAt DateTime @default(now())
   @@index([patientId, date])
+}
+
+model LabRequest {
+  id String @id @default(uuid()) @db.Uuid
+  treatmentId String @unique @db.Uuid
+  treatment Treatment @relation(fields: [treatmentId], references: [id], onDelete: Restrict)
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  status String @default("to_request") @db.VarChar(16)
+  laboratory String @default("") @db.VarChar(150)
+  cost Decimal @default(0) @db.Decimal(12, 2)
+  currency String @default("USD") @db.VarChar(3)
+  material String @default("") @db.VarChar(100)
+  shade String @default("") @db.VarChar(40)
+  instructions String @default("") @db.VarChar(2000)
+  requestDate DateTime? @db.Date
+  dueDate DateTime? @db.Date
+  receivedDate DateTime? @db.Date
+  createdById String
+  createdBy User @relation("LabRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  events LabRequestEvent[]
+  @@index([patientId, status, createdAt])
+  @@index([roomId, status])
+}
+
+model LabRequestEvent {
+  id String @id @default(uuid()) @db.Uuid
+  requestId String @db.Uuid
+  request LabRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  action String @db.VarChar(16)
+  date DateTime @db.Date
+  actorId String
+  actor User @relation("LabRequestEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  recordedAt DateTime @default(now())
+  @@index([requestId, recordedAt])
 }
 model TreatmentTooth {
   treatmentId String @db.Uuid
@@ -219,6 +289,51 @@ model TreatmentPlan {
   actorId String?
   treatments Treatment[]
   totals ClinicalRecord[]
+  payments Payment[]
   @@unique([patientId, number])
   @@unique([id, patientId])
+}
+
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  planId String? @db.Uuid
+  plan TreatmentPlan? @relation(fields: [planId, patientId], references: [id, patientId], onDelete: Restrict)
+  amount Decimal @db.Decimal(18, 2)
+  currency Currency
+  baseCurrency Currency
+  baseAmount Decimal @db.Decimal(18, 2)
+  lbpPerUsd Decimal? @db.Decimal(18, 6)
+  method String @db.VarChar(24)
+  date DateTime @db.Date
+  note String @default("") @db.VarChar(4000)
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  recordedAt DateTime @default(now())
+  @@index([patientId, planId, date])
+  @@index([roomId, date])
+}
+
+model PatientFile {
+  id String @id @default(uuid()) @db.Uuid
+  patientId Int
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  storedName String @unique @db.VarChar(80)
+  originalName String @db.VarChar(255)
+  kind String @db.VarChar(12)
+  mimeType String @db.VarChar(80)
+  size Int
+  tooth Int?
+  date DateTime @db.Date
+  description String @default("") @db.VarChar(2000)
+  uploadedById String
+  uploadedBy User @relation("PatientFileUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  @@index([patientId, date, createdAt])
+  @@index([roomId, kind])
 }

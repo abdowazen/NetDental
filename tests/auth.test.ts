@@ -25,6 +25,12 @@ const sessions = new Map<string, Session>();
 let passwordHash = "";
 const password = "test-only-long-password";
 const store: Store = {
+  async getLabRequests() { return { requests: [], totalCost: "0.00" }; },
+  async createLabDraft() {},
+  async updateLabRequest() {},
+  async transitionLabRequest() {},
+  async getPayments() { return { baseCurrency: "USD", effectiveRate: null, planEstimate: "0.00", discountAmount: "0.00", discountPercent: "0.00", patientCharge: "0.00", paymentReceived: "0.00", patientBalance: "0.00", payments: [], ledger: [] }; },
+  async addPayment() {},
   async getChart() { return { dentition: null, toothEvents: [], findings: [], treatments: [] }; },
   async saveDentition() {},
   async createPlan() {},

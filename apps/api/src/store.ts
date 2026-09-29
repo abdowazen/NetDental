@@ -4,13 +4,19 @@ import { patientStore, type PatientStore } from "./patients.js";
 import { procedureStore, type ProcedureStore } from "./procedures.js";
 import { odontogramStore, type OdontogramStore } from "./odontogram.js";
 import { accessStore, type AccessStore } from "./access.js";
+import { paymentStore, type PaymentStore } from "./payments.js";
+import { laboratoryStore, type LaboratoryStore } from "./laboratory.js";
+import { patientFileStore, type PatientFileStore } from "./patient-files.js";
+import { dashboardStore, type DashboardStore } from "./dashboard.js";
+import { reportStore, type ReportStore } from "./reports.js";
+import { systemLogStore, type SystemLogStore } from "./system-logs.js";
 export type NewDentist = {
   username: string;
   passwordHash: string;
   displayName: string;
   preferredLanguage: Language;
 };
-export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore {
+export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore, PaymentStore, LaboratoryStore, PatientFileStore, DashboardStore, ReportStore, SystemLogStore {
   getBaseCurrency(roomId: number): Promise<Currency>;
   setBaseCurrency(currency: Currency, roomId: number): Promise<void>;
   listExchangeRates(year: string, roomId: number): Promise<ExchangeRate[]>;
@@ -38,6 +44,12 @@ export function prismaStore(db: PrismaClient): Store {
     ...procedureStore(db),
     ...odontogramStore(db),
     ...accessStore(db),
+    ...paymentStore(db),
+    ...laboratoryStore(db),
+    ...patientFileStore(db),
+    ...dashboardStore(db),
+    ...reportStore(db),
+    ...systemLogStore(db),
     async getBaseCurrency(roomId) {
       return (
         (await db.currencySettings.findUnique({ where: { id: roomId } }))

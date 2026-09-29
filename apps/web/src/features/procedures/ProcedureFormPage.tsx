@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import {
   allowed, procedureSchema, procedureCategories, procedureDentitions,
   procedureScopes, chartIndicators, type Procedure, type ProcedureInput,
+  type ProcedureList,
 } from "@clinic/shared";
 import { useAuth } from "../auth/AuthProvider";
 import { useWorkspace } from "../auth/WorkspaceProvider";
@@ -45,11 +46,20 @@ function ProcedureForm({ procedure }: { procedure?: Procedure }) {
     category: procedure?.category ?? "other", description: procedure?.description ?? "",
     defaultPrice: procedure?.defaultPrice ?? "", dentition: procedure?.dentition ?? "both",
     scope: procedure?.scope ?? "single_tooth", requiresLab: procedure?.requiresLab ?? false,
+    labLaboratory: procedure?.labLaboratory ?? "",
+    labDefaultCost: procedure?.labDefaultCost ?? "0.00", labTurnaroundDays: procedure?.labTurnaroundDays ?? 0,
+    labMaterial: procedure?.labMaterial ?? "", labShade: procedure?.labShade ?? "", labInstructions: procedure?.labInstructions ?? "",
     chartIndicator: procedure?.chartIndicator ?? "generic", active: procedure?.active ?? true,
   };
-  const { register, handleSubmit, setError, formState: { errors } } = useForm<ProcedureInput>({
+  const { register, handleSubmit, setError, watch, formState: { errors } } = useForm<ProcedureInput>({
     resolver: zodResolver(procedureSchema), defaultValues: defaults, mode: "onTouched",
   });
+  const requiresLab = watch("requiresLab");
+  const laboratories = useQuery({
+    queryKey: ["procedures", "laboratory-options", roomId], enabled: requiresLab,
+    queryFn: ({ signal }) => api<ProcedureList>("/api/procedures?pageSize=100&sort=name&direction=asc", { signal }),
+  });
+  const laboratoryOptions = [...new Set((laboratories.data?.procedures ?? []).map((item) => item.labLaboratory).filter(Boolean))];
   const mutation = useMutation({
     mutationFn: (input: ProcedureInput) => api<{ procedure: Procedure }>(
       procedure ? `/api/procedures/${procedure.id}` : "/api/procedures",
@@ -84,47 +94,33 @@ function ProcedureForm({ procedure }: { procedure?: Procedure }) {
       </div>
     </div>
     <form id="procedure-form" noValidate onSubmit={handleSubmit((input) => canSave && mutation.mutate(input))} className="patient-form card p-4 sm:p-5">
-      <fieldset disabled={mutation.isPending || !canSave} className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Field id="code" label={`${t("procedureCode")} *`} error={error("code")}>
-          <input id="code" aria-required="true" maxLength={40} {...register("code")} {...attrs("code")} />
-        </Field>
-        <Field id="name" label={`${t("procedureName")} *`} error={error("name")}>
-          <input id="name" aria-required="true" maxLength={150} {...register("name")} {...attrs("name")} />
-        </Field>
-        <Field id="category" label={t("procedureCategory")} error={error("category")}>
-          <select id="category" {...register("category")} {...attrs("category")}>
-            {procedureCategories.map((value) => <option key={value} value={value}>{t(`procedureCategory_${value}`)}</option>)}
-          </select>
-        </Field>
-        <Field id="defaultPrice" label={`${t("procedurePrice")} *`} error={error("defaultPrice")}>
-          <input id="defaultPrice" type="number" min="0" max="9999999999.99" step="0.01" inputMode="decimal" aria-required="true" {...register("defaultPrice")} {...attrs("defaultPrice")} />
-        </Field>
-        <Field id="dentition" label={t("procedureDentition")} error={error("dentition")}>
-          <select id="dentition" {...register("dentition")} {...attrs("dentition")}>
-            {procedureDentitions.map((value) => <option key={value} value={value}>{t(`procedureDentition_${value}`)}</option>)}
-          </select>
-        </Field>
-        <Field id="scope" label={t("procedureScope")} error={error("scope")}>
-          <select id="scope" {...register("scope")} {...attrs("scope")}>
-            {procedureScopes.map((value) => <option key={value} value={value}>{t(`procedureScope_${value}`)}</option>)}
-          </select>
-        </Field>
-        <Field id="chartIndicator" label={t("procedureChartIndicator")} error={error("chartIndicator")}>
-          <select id="chartIndicator" {...register("chartIndicator")} {...attrs("chartIndicator")}>
-            {chartIndicators.map((value) => <option key={value} value={value}>{t(`procedureIndicator_${value}`)}</option>)}
-          </select>
-        </Field>
-        <label className="flex items-center gap-3 text-sm font-medium">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" {...register("requiresLab")} />{t("procedureRequiresLab")}
-        </label>
-        <label className="flex items-center gap-3 text-sm font-medium">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" {...register("active")} />{t("procedureActive")}
-        </label>
-        <div className="sm:col-span-2 lg:col-span-3">
-          <Field id="description" label={t("procedureDescription")} error={error("description")}>
-            <textarea id="description" rows={6} maxLength={4000} {...register("description")} {...attrs("description")} />
-          </Field>
-        </div>
+      <fieldset disabled={mutation.isPending || !canSave} className="space-y-5">
+        <section aria-labelledby="procedure-details-heading">
+          <h3 id="procedure-details-heading" className="mb-3 font-semibold">{t("procedureDetails")}</h3>
+          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field id="code" label={`${t("procedureCode")} *`} error={error("code")}><input id="code" aria-required="true" maxLength={40} {...register("code")} {...attrs("code")} /></Field>
+            <Field id="name" label={`${t("procedureName")} *`} error={error("name")}><input id="name" aria-required="true" maxLength={150} {...register("name")} {...attrs("name")} /></Field>
+            <Field id="category" label={t("procedureCategory")} error={error("category")}><select id="category" {...register("category")} {...attrs("category")}>{procedureCategories.map((value) => <option key={value} value={value}>{t(`procedureCategory_${value}`)}</option>)}</select></Field>
+            <Field id="defaultPrice" label={`${t("procedurePrice")} *`} error={error("defaultPrice")}><input id="defaultPrice" type="number" min="0" max="9999999999.99" step="0.01" inputMode="decimal" aria-required="true" {...register("defaultPrice")} {...attrs("defaultPrice")} /></Field>
+            <Field id="dentition" label={t("procedureDentition")} error={error("dentition")}><select id="dentition" {...register("dentition")} {...attrs("dentition")}>{procedureDentitions.map((value) => <option key={value} value={value}>{t(`procedureDentition_${value}`)}</option>)}</select></Field>
+            <Field id="scope" label={t("procedureScope")} error={error("scope")}><select id="scope" {...register("scope")} {...attrs("scope")}>{procedureScopes.map((value) => <option key={value} value={value}>{t(`procedureScope_${value}`)}</option>)}</select></Field>
+            <Field id="chartIndicator" label={t("procedureChartIndicator")} error={error("chartIndicator")}><select id="chartIndicator" {...register("chartIndicator")} {...attrs("chartIndicator")}>{chartIndicators.map((value) => <option key={value} value={value}>{t(`procedureIndicator_${value}`)}</option>)}</select></Field>
+            <label className="flex min-h-12 items-center gap-3 self-end rounded-lg border border-line bg-soft px-3 text-sm font-medium"><input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" {...register("requiresLab")} />{t("procedureRequiresLab")}</label>
+            <label className="flex min-h-12 items-center gap-3 self-end rounded-lg border border-line bg-soft px-3 text-sm font-medium"><input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" {...register("active")} />{t("procedureActive")}</label>
+            <div className="sm:col-span-2 lg:col-span-3"><Field id="description" label={t("procedureDescription")} error={error("description")}><textarea id="description" rows={4} maxLength={4000} {...register("description")} {...attrs("description")} /></Field></div>
+          </div>
+        </section>
+        {requiresLab && <section aria-labelledby="procedure-lab-heading" className="rounded-xl border border-line bg-soft p-4">
+          <h3 id="procedure-lab-heading" className="mb-3 font-semibold">{t("procedureLabDetails")}</h3>
+          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+            <Field id="labLaboratory" label={t("labLaboratory")} error={error("labLaboratory")}><input id="labLaboratory" list="procedure-laboratories" maxLength={150} {...register("labLaboratory")} {...attrs("labLaboratory")} /><datalist id="procedure-laboratories">{laboratoryOptions.map((laboratory) => <option key={laboratory} value={laboratory}/>)}</datalist></Field>
+            <Field id="labDefaultCost" label={t("labDefaultCost")} error={error("labDefaultCost")}><input id="labDefaultCost" type="number" min="0" step="0.01" {...register("labDefaultCost")} {...attrs("labDefaultCost")} /></Field>
+            <Field id="labTurnaroundDays" label={t("labTurnaroundDays")} error={error("labTurnaroundDays")}><input id="labTurnaroundDays" type="number" min="0" max="365" {...register("labTurnaroundDays", { valueAsNumber: true })} {...attrs("labTurnaroundDays")} /></Field>
+            <Field id="labMaterial" label={t("labMaterial")} error={error("labMaterial")}><input id="labMaterial" maxLength={100} {...register("labMaterial")} {...attrs("labMaterial")} /></Field>
+            <Field id="labShade" label={t("labShade")} error={error("labShade")}><input id="labShade" maxLength={40} {...register("labShade")} {...attrs("labShade")} /></Field>
+            <div className="sm:col-span-2 lg:col-span-3"><Field id="labInstructions" label={t("labInstructions")} error={error("labInstructions")}><textarea id="labInstructions" rows={3} maxLength={2000} {...register("labInstructions")} {...attrs("labInstructions")} /></Field></div>
+          </div>
+        </section>}
       </fieldset>
       {mutation.error && errorKey(mutation.error) !== "CONFLICT" && <div className="mt-5"><ErrorMessage message={t(errorKey(mutation.error))} /></div>}
     </form>

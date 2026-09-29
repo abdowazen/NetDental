@@ -18,7 +18,7 @@ let language: "en" | "fr" = "en";
 let configValid = true;
 let failure = false;
 const fallbackFile = join(__dirname, "connection.html");
-app.setName("NetDental");
+app.setName("NetDenty");
 // Keep the existing profile location so upgrades retain configuration and preferences.
 app.setPath("userData", join(app.getPath("appData"), "Dental Clinic"));
 const customUserData = app.commandLine.getSwitchValue("user-data-dir");
@@ -57,6 +57,7 @@ function startApi() {
       WEB_DIST: app.isPackaged
         ? join(process.resourcesPath, "web")
         : resolve("apps/web/dist"),
+      PATIENT_FILES_DIR: join(app.getPath("userData"), "patient-files"),
     },
     stdio: "pipe",
   });
@@ -162,7 +163,8 @@ else {
       minHeight: 620,
       show: false,
       backgroundColor: "#f5f8f7",
-      title: "NetDental",
+      title: "NetDenty",
+      icon: join(__dirname, "assets", "netdenty-mark.png"),
       autoHideMenuBar: true,
       webPreferences: {
         preload: join(__dirname, "preload.cjs"),

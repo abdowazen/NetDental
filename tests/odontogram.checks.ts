@@ -26,7 +26,7 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   const finding = { description: "Existing filling", teeth: [association(16, ["occlusal"])], date: "2026-01-01", notes: "" };
   assert.equal((await write("/findings", finding)).statusCode, 201);
   assert.equal((await chart()).treatments.length, 0, "Findings must not create treatments/charges");
-  const p = await db.procedure.create({ data: { roomId, code: "RCTX", name: "Test root canal", category: "endodontics", defaultPrice: "100.00", dentition: "both", scope: "single_tooth" } });
+  const p = await db.procedure.create({ data: { roomId, code: "RCTX", name: "Test root canal", category: "endodontics", defaultPrice: "100.00", dentition: "both", scope: "single_tooth", requiresLab: true, labLaboratory: "Cedar Lab", labDefaultCost: "40.00", labTurnaroundDays: 7, labMaterial: "Zirconia", labShade: "A2", labInstructions: "Use scan" } });
   const input = { procedureId: p.id, mode: "independent", teeth: [association(16)], date: "2026-02-01", notes: "", price: "100.00" };
   assert.equal((await write("/treatments", input)).statusCode, 201);
   assert.equal((await write("/treatments", { ...input, date: "2026-03-01" })).statusCode, 201);
@@ -120,6 +120,8 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   const fresh = await chart();
   assert.equal(fresh.plan?.number, oldPlan.number + 1);
   assert.equal(fresh.treatments.length, 0);
+  assert.equal(fresh.plans?.length, 2);
+  assert.ok((fresh.historyTreatments?.length ?? 0) >= oldCount, "History includes treatments from earlier plans");
   assert.equal(fresh.planDiscount, null);
   assert.equal(fresh.toothEvents.length, data.toothEvents.length);
   assert.equal(await db.treatment.count({ where: { patientId, planId: oldPlan.id } }), oldCount);

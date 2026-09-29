@@ -1,16 +1,17 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { EllipsisVertical, ChevronDown } from "lucide-react";
 import { z, ZodError } from "zod";
 import {
   allTeeth, permanentTeeth, primaryTeeth, toothInfo, validSurfaces, surfaceLabel, dentitions,
-  latestToothStates, treatmentSchema, treatmentNet, moneyString,
+  convertCurrency, latestToothStates, treatmentSchema, treatmentNet, moneyString,
   treatmentStatusSchema, voidSchema, clinicDate, allowed,
   type Treatment, type ChartData, type ToothAssociation, type Dentition, type ProcedureList,
 } from "@clinic/shared";
 import { api, errorKey } from "../../lib/api";
 import { Button, ErrorMessage, Field } from "../../components/ui";
+import { Pagination } from "../../components/Pagination";
 import { useAuth } from "../auth/AuthProvider";
 import { useWorkspace } from "../auth/WorkspaceProvider";
 import type { CameraView } from "./OdontogramCanvas";
@@ -29,7 +30,7 @@ const actionColors: Record<string, string> = {
 function recordStatus(record: Treatment) {
   return record.voidReason ? "voided" : record.status;
 }
-type TabNavigate = (tab: "plan" | "session" | "payments" | "history") => void;
+type TabNavigate = (tab: "plan" | "session" | "payments" | "laboratory" | "history") => void;
 
 export default function OdontogramWorkspace({ patientId, historyOnly = false, showHistory = false, onNavigate }: { patientId?: number; historyOnly?: boolean; showHistory?: boolean; onNavigate?: TabNavigate }) {
   const { t } = useTranslation();
@@ -52,10 +53,21 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
   const client = useQueryClient();
   const create = !!patientId && allowed(user, "treatment", "create");
   const modify = !!patientId && allowed(user, "treatment", "modify");
+  const baseCurrency = data.baseCurrency ?? "USD";
+  const formatMoney = (amount: bigint) => {
+    if (baseCurrency === "LBP" && !data.effectiveRate) return `— ${baseCurrency}`;
+    return `${convertCurrency(moneyString(amount), "USD", baseCurrency, data.effectiveRate ?? null)} ${baseCurrency}`;
+  };
   const [sessionSearch, setSessionSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [sessionSort, setSessionSort] = useState<"procedure" | "tooth" | "status" | "date" | "price">("date");
+  const [sessionDirection, setSessionDirection] = useState<"asc" | "desc">("desc");
+  const [sessionPage, setSessionPage] = useState(1);
+  const [sessionPageSize, setSessionPageSize] = useState(10);
+  const [historyPlan, setHistoryPlan] = useState("all");
+  const [groupHistory, setGroupHistory] = useState(true);
   const [filter, setFilter] = useState<Dentition>(data.dentition ?? "adult");
   const [arch, setArch] = useState("both");
   const [multi, setMulti] = useState(false);
@@ -78,12 +90,12 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
     const timer = setTimeout(() => setCatalogQuery(catalogSearch.trim()), 250);
     return () => clearTimeout(timer);
   }, [catalogSearch]);
+  useEffect(() => { setSessionPage(1); }, [sessionSearch, statusFilter, dateFrom, dateTo, historyPlan, groupHistory]);
   const catalog = useQuery({
     queryKey: ["procedures", "list", roomId, "chart", catalogQuery],
     enabled: create && allowed(user, "actsProcedures") && !historyOnly,
     queryFn: ({ signal }) => api<ProcedureList>(`/api/procedures?${new URLSearchParams({ q: catalogQuery, pageSize: "100", sort: "name", direction: "asc" })}`, { signal }),
   });
-
   const mutation = useMutation({
     mutationFn: ({ path, body, method = "POST" }: { path: string; body: unknown; method?: string }) =>
       api(`/api/odontogram/${patientId}/${path}`, { method, body: JSON.stringify(body) }),
@@ -147,11 +159,48 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
     setAction({ id, type, status, version }); setActionNotes(""); setActionDate(clinicDate()); setError(""); setNotice("");
   }
   const searchTerm = sessionSearch.trim().toLocaleLowerCase();
-  const sessionRecords = (data.sessions ?? data.treatments).filter((record) =>
+  const planNumbers = new Map((data.plans ?? []).map((plan) => [plan.id, plan.number]));
+  const historySource = showHistory ? data.historyTreatments ?? data.sessions ?? data.treatments : data.sessions ?? data.treatments;
+  const historyPlanRanges = new Map<string, { from: string; to: string }>();
+  if (showHistory) for (const record of historySource) {
+    const key = record.planId ?? "standalone";
+    const range = historyPlanRanges.get(key);
+    historyPlanRanges.set(key, range
+      ? { from: record.date < range.from ? record.date : range.from, to: record.date > range.to ? record.date : range.to }
+      : { from: record.date, to: record.date });
+  }
+  const filteredSessions = historySource.filter((record) =>
+    (!showHistory || historyPlan === "all" || (historyPlan === "standalone" ? record.planId === null : record.planId === historyPlan)) &&
     (!statusFilter.length || statusFilter.includes(recordStatus(record))) &&
     (!dateFrom || record.date >= dateFrom) && (!dateTo || record.date <= dateTo) &&
     (!searchTerm || record.teeth.some((a) => String(a.tooth).includes(searchTerm)) ||
       record.code.toLocaleLowerCase().includes(searchTerm) || record.name.toLocaleLowerCase().includes(searchTerm)));
+  const sessionRecords = [...filteredSessions].sort((a, b) => {
+    if (showHistory && groupHistory) {
+      const planComparison = (planNumbers.get(b.planId ?? "") ?? -1) - (planNumbers.get(a.planId ?? "") ?? -1);
+      if (planComparison) return planComparison;
+    }
+    let comparison = 0;
+    if (sessionSort === "price") {
+      const left = treatmentNet(a); const right = treatmentNet(b);
+      comparison = left < right ? -1 : left > right ? 1 : 0;
+    } else {
+      const value = (record: Treatment) => sessionSort === "procedure" ? `${record.code} ${record.name}`.toLocaleLowerCase()
+        : sessionSort === "tooth" ? record.teeth.map((tooth) => tooth.tooth).sort((x, y) => x - y).join(",")
+        : sessionSort === "status" ? recordStatus(record) : record.date;
+      comparison = value(a).localeCompare(value(b), undefined, { numeric: true });
+    }
+    return sessionDirection === "asc" ? comparison : -comparison;
+  });
+  const sessionPages = Math.max(1, Math.ceil(sessionRecords.length / sessionPageSize));
+  const safeSessionPage = Math.min(sessionPage, sessionPages);
+  const sessionRows = sessionRecords.slice((safeSessionPage - 1) * sessionPageSize, safeSessionPage * sessionPageSize);
+  const historyPlanLabel = (planId: string | null | undefined) => planId ? t("planNumber", { number: planNumbers.get(planId) ?? "—" }) : t("historyWithoutPlan");
+  const historyPlanRange = (planId: string | null | undefined) => historyPlanRanges.get(planId ?? "standalone");
+  const historyGroupLabel = (planId: string | null | undefined) => {
+    const range = historyPlanRange(planId);
+    return range ? `${historyPlanLabel(planId)} · ${t("sessionDateFrom")}: ${range.from} · ${t("sessionDateTo")}: ${range.to}` : historyPlanLabel(planId);
+  };
   function associations(rows: ToothAssociation[]) {
     return rows.length ? rows.map((a) => `${a.tooth}${a.surfaces.length ? " (" + a.surfaces.map((s) => t("odSurface_" + surfaceLabel(a.tooth, s))).join(", ") + ")" : ""} · ${t("odRole_" + a.role)}`).join("; ") : t("procedureScope_whole_mouth");
   }
@@ -234,7 +283,7 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
       <TreatmentPlanPanel treatments={data.treatments} selected={ids} canAdd={create}
         canModify={modify} canDelete={!!patientId && allowed(user, "treatment", "delete")}
         plan={data.plan} onNewPlan={() => mutation.mutate({ path: "plans", body: { expectedPlanId: data.plan?.id ?? null } })}
-        planDiscount={data.planDiscount} onUpdate={updatePlan} busy={busy}
+        planDiscount={data.planDiscount} onUpdate={updatePlan} busy={busy} formatMoney={formatMoney}
         addDisabled={!procedure || (procedure.scope !== "whole_mouth" && !ids.length)}
         onAdd={() => addProcedure()} onNavigate={onNavigate}
         procedureInput={<div className="min-w-0 flex-1">
@@ -252,10 +301,11 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
       </div>
     </div>}
     {historyOnly && <><section className="card overflow-hidden">
-      <div className="flex flex-wrap items-end gap-3 px-4 pb-4 pt-3">
-        <div className="min-w-52 flex-1"><Field id="session-search" label={t("sessionSearch")}><input id="session-search" className="input !min-h-10 !py-2" type="search" value={sessionSearch} onChange={(e) => setSessionSearch(e.target.value)} /></Field></div>
-        <div><span className="mb-1 block text-sm font-medium">{t("twStatus")}</span>
-          <FloatingDropdown label={t("sessionFilterStatus")} className="input !min-h-10 !py-2 flex min-w-44 items-center justify-between gap-2"
+      <div className={`grid items-end gap-2 px-4 pb-4 pt-3 sm:grid-cols-2 ${showHistory ? "lg:grid-cols-[minmax(10rem,1.35fr)_minmax(8rem,.9fr)_auto_minmax(8rem,.8fr)_minmax(8rem,.72fr)_minmax(8rem,.72fr)]" : "lg:grid-cols-[minmax(12rem,1fr)_minmax(9rem,.65fr)_minmax(8rem,.55fr)_minmax(8rem,.55fr)]"}`}>
+        <div className="min-w-0"><Field id="session-search" label={t("sessionSearch")}><input id="session-search" className="input !min-h-10 w-full !py-2" type="search" value={sessionSearch} onChange={(e) => setSessionSearch(e.target.value)} /></Field></div>
+        {showHistory && <><div className="min-w-0"><Field id="history-plan" label={t("historyPlanFilter")}><select id="history-plan" className="input !min-h-10 w-full !py-2" value={historyPlan} onChange={(event) => setHistoryPlan(event.target.value)}><option value="all">{t("historyAll")}</option>{(data.plans ?? []).map((plan) => <option key={plan.id} value={plan.id}>{t("planNumber", { number: plan.number })}</option>)}<option value="standalone">{t("historyWithoutPlan")}</option></select></Field></div><label className="flex h-10 whitespace-nowrap items-center gap-2 text-sm"><input type="checkbox" checked={groupHistory} onChange={(event) => setGroupHistory(event.target.checked)}/>{t("historyGroupByPlan")}</label></>}
+        <div className="min-w-0"><span className="mb-2 block text-sm font-medium">{t("twStatus")}</span>
+          <FloatingDropdown label={t("sessionFilterStatus")} className="input !min-h-10 !py-2 flex w-full items-center justify-between gap-2"
             trigger={<><span>{statusFilter.length ? statusFilter.map((status) => t("odStatus_" + status)).join(", ") : t("sessionAllStatuses")}</span><ChevronDown size={16}/></>}>
             <div className="space-y-2">
               <button type="button" className="text-accent-ink" onClick={() => setStatusFilter([])}>{t("sessionAllStatuses")}</button>
@@ -265,49 +315,35 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
             </div>
           </FloatingDropdown>
         </div>
-        <Field id="session-from" label={t("sessionDateFrom")}><input id="session-from" className="input !min-h-10 !py-2" type="date" max={dateTo || undefined} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></Field>
-        <Field id="session-to" label={t("sessionDateTo")}><input id="session-to" className="input !min-h-10 !py-2" type="date" min={dateFrom || undefined} value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field>
+        <div className="grid min-w-0 grid-cols-2 gap-2 sm:col-span-2 lg:col-span-2">
+          <div className="min-w-0"><Field id="session-from" label={t("sessionDateFrom")}><input id="session-from" className="input !min-h-10 w-full min-w-0 !py-2" type="date" max={dateTo || undefined} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></Field></div>
+          <div className="min-w-0"><Field id="session-to" label={t("sessionDateTo")}><input id="session-to" className="input !min-h-10 w-full min-w-0 !py-2" type="date" min={dateFrom || undefined} value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></Field></div>
+        </div>
       </div>
       <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-soft text-muted"><tr>
-        <th className="w-12 p-3" aria-label={t("patientActions")} />
-        {["twProcedure","twTooth","twStatus","odDate","twNetPrice"].map((label) => <th key={label} className="p-3">{t(label)}</th>)}
+        {!showHistory && <th className="w-12 p-3" aria-label={t("patientActions")} />}
+        {([['procedure','twProcedure'],['tooth','twTooth'],['status','twStatus'],['date','odDate'],['price','twNetPrice']] as const).map(([column, label]) => <th key={column} scope="col" aria-sort={sessionSort === column ? sessionDirection === "asc" ? "ascending" : "descending" : "none"} className="whitespace-nowrap p-3 font-medium"><button type="button" className="inline-flex items-center gap-2 rounded" onClick={() => { setSessionDirection(sessionSort === column && sessionDirection === "asc" ? "desc" : "asc"); setSessionSort(column); setSessionPage(1); }}>{t(label)}<span aria-hidden="true">{sessionSort === column ? sessionDirection === "asc" ? "↑" : "↓" : "↕"}</span></button></th>)}
       </tr></thead><tbody>
-        {!sessionRecords.length && <tr><td colSpan={6} className="p-5 text-center text-muted">{t("sessionNoResults")}</td></tr>}
-        {sessionRecords.map((record) => <tr key={record.id} className="border-t border-line align-top">
-          <td className="p-3">
+        {!sessionRecords.length && <tr><td colSpan={showHistory ? 5 : 6} className="p-5 text-center text-muted">{t("sessionNoResults")}</td></tr>}
+        {sessionRows.map((record, index) => <Fragment key={record.id}>{showHistory && groupHistory && (index === 0 || sessionRows[index - 1].planId !== record.planId) && <tr className="border-t border-line bg-accent-soft"><td colSpan={5} className="px-3 py-2 text-xs font-semibold text-accent-ink">{historyGroupLabel(record.planId)}</td></tr>}<tr className="action-menu-row border-t border-line align-top">
+          {!showHistory && <td className="p-3">
             {((modify && !record.voidReason) || (create && record.voidReason)) && <FloatingDropdown closeOnAction label={t("sessionRowActions", { name: record.name })}
               className="flex w-8 items-center justify-center rounded p-2 text-muted hover:bg-soft" trigger={<EllipsisVertical size={16}/>}>
               <div className="flex flex-col gap-2">
             {modify && !record.voidReason && ["planned","in_progress"].includes(record.status) && (record.status === "planned" ? ["in_progress","completed","cancelled"] : ["completed","cancelled"]).map((status) => <button key={status} className="text-left text-accent-ink" disabled={busy} onClick={() => openAction(record.id, "treatment", status, record.version)}>{t("odStatus_" + status)}</button>)}
+            {!record.voidReason && record.requiresLab && <button className="text-left text-accent-ink" onClick={() => onNavigate?.("laboratory")}>{t("labOpenRequest")}</button>}
             {modify && !record.voidReason && <button disabled={busy} className="text-left text-danger-ink" onClick={() => openAction(record.id, "treatment", "voided")}>{t("odVoid")}</button>}
             {create && record.voidReason && <button className="text-left text-accent-ink" onClick={() => { resetForm(); setCorrection(record.id); setSelected(record.teeth); setMulti(record.teeth.length > 1); onNavigate?.("plan"); }}>{t("odCorrection")}</button>}
               </div>
             </FloatingDropdown>}
-          </td>
+          </td>}
           <td className="p-3"><strong>{record.code} · {record.name}</strong>          </td>
           <td className="max-w-xs p-3">{associations(record.teeth)}</td>
           <td className="p-3"><span className={"inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold " + (actionColors[recordStatus(record)] ?? actionColors.planned)}>{t("odStatus_" + recordStatus(record))}</span></td>
-          <td className="p-3">{record.date}</td><td className="whitespace-nowrap p-3">{moneyString(treatmentNet(record))} USD</td>
-        </tr>)}
+          <td className="p-3">{record.date}</td><td className="whitespace-nowrap p-3">{formatMoney(treatmentNet(record))}</td>
+        </tr></Fragment>)}
       </tbody></table></div>
-    </section>
-    {showHistory && <div className="grid gap-3 lg:grid-cols-2">
-      <section className="card p-4"><h2 className="mb-3 font-semibold">{t("odKind_finding")}</h2><p className="mb-3 text-xs text-muted">{t("odFindingHint")}</p>
-        {!data.findings.length && <p className="text-sm text-muted">{t("odNoRecords")}</p>}
-        {data.findings.map((record) => <article key={record.id} className="space-y-1 border-t border-line py-3 text-sm">
-          <strong>{record.description}</strong><p>{record.date} · {associations(record.teeth)}</p><p className="whitespace-pre-wrap">{record.notes}</p>
-          <p className="text-xs text-muted">{t("odRecorded")}: {record.recordedAt} · {record.actorId}</p>
-          {record.voidReason ? <p>{t("odStatus_voided")}: {record.voidReason}</p> : modify && <button className="text-danger-ink" disabled={busy} onClick={() => openAction(record.id, "clinical", "voided")}>{t("odVoid")}</button>}
-        </article>)}
-      </section>
-      <section className="card p-4"><h2 className="mb-3 font-semibold">{t("odToothHistory")}</h2>
-        {!data.toothEvents.length && <p className="text-sm text-muted">{t("odNoRecords")}</p>}
-        {data.toothEvents.map((record) => <article key={record.id} className="space-y-1 border-t border-line py-3 text-sm">
-          <strong>{record.tooth} · {t("odState_" + record.state)}</strong><p>{record.date} · {record.notes}</p>
-          <p className="text-xs text-muted">{t("odRecorded")}: {record.recordedAt} · {record.actorId}</p>
-          {record.voidReason ? <p>{t("odStatus_voided")}: {record.voidReason}</p> : modify && <button className="text-danger-ink" disabled={busy} onClick={() => openAction(record.id, "clinical", "voided")}>{t("odVoid")}</button>}
-        </article>)}
-      </section>
-    </div>}</>}
+      <Pagination page={safeSessionPage} pageSize={sessionPageSize} total={sessionRecords.length} busy={busy} label={t("sessionPagination")} onPageChange={setSessionPage} onPageSizeChange={(size) => { setSessionPageSize(size); setSessionPage(1); }} />
+    </section></>}
   </div>;
 }

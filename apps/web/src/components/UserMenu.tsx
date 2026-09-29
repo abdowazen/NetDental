@@ -68,11 +68,11 @@ export function UserMenu() {
           {allowed(user, "settings") && (
             <Link
               className="menu-item"
-              to="/settings"
+              to="/settings/general"
               onClick={() => setOpen(false)}
             >
               <Settings size={17} />
-              {t("settings")}
+              {t("generalSettings")}
             </Link>
           )}
           <button

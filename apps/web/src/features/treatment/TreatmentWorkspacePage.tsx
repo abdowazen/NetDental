@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { ClipboardList, CreditCard, Wallet, Scale, Search, CalendarDays, Layers, FlaskConical, Images, History } from "lucide-react";
+import { CreditCard, Search, CalendarDays, Layers, FlaskConical, Images, History } from "lucide-react";
 import { allowed, type Patient, type PatientList } from "@clinic/shared";
 import { useAuth } from "../auth/AuthProvider";
 import { useWorkspace } from "../auth/WorkspaceProvider";
@@ -10,8 +10,11 @@ import { api, errorKey } from "../../lib/api";
 import { Button, ErrorMessage } from "../../components/ui";
 const OdontogramWorkspace = lazy(() => import("./OdontogramWorkspace"));
 import { ChartWorkspaceBoundary } from "./ChartWorkspaceBoundary";
+import { PaymentsWorkspace } from "./PaymentsWorkspace";
+import { LaboratoryWorkspace } from "./LaboratoryWorkspace";
+import { XrayFilesWorkspace } from "./XrayFilesWorkspace";
 
-const tabs = ["plan", "session", "payments", "laboratory", "files", "history"] as const;
+const tabs = ["plan", "session", "laboratory", "payments", "files", "history"] as const;
 type Tab = typeof tabs[number];
 const tabIcons = { plan: Layers, session: CalendarDays, payments: CreditCard, laboratory: FlaskConical, files: Images, history: History };
 
@@ -48,7 +51,7 @@ export function TreatmentWorkspacePage() {
     setSearch("");
     setPatientOpen(false);
     setActiveOption(-1);
-    setTab((current) => current === "session" ? "session" : "plan");
+    setTab((current) => current === "session" || current === "payments" || current === "laboratory" || current === "files" ? current : "plan");
   }
   function changeTab(next: Tab) { setTab(next); }
   function onTabKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -110,17 +113,7 @@ export function TreatmentWorkspacePage() {
       {tabs.map((value, index) => <button key={value} id={`treatment-tab-${value}`} type="button" role="tab" aria-selected={tab === value} aria-controls={`treatment-panel-${value}`} tabIndex={tab === value ? 0 : -1} onKeyDown={(event) => onTabKey(event, index)} onClick={() => changeTab(value)} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${tab === value ? "border-accent-solid text-accent-ink" : "border-transparent text-muted hover:text-ink"}`}>{t(`twTab_${value}`)}</button>)}
     </div>
     <section id={`treatment-panel-${tab}`} role="tabpanel" aria-labelledby={`treatment-tab-${tab}`} tabIndex={0}>
-      {tab === "plan" || tab === "session" || tab === "history" ? ((patient || tab === "plan" || tab === "session") ? <ChartWorkspaceBoundary key={patient?.id ?? "preview"}><Suspense fallback={<p>{t("loading")}</p>}><OdontogramWorkspace key={patient?.id ?? "preview"} patientId={patient?.id} historyOnly={tab !== "plan"} showHistory={tab === "history"} onNavigate={changeTab} /></Suspense></ChartWorkspaceBoundary> : <div className="card p-8 text-center text-muted">{t("twChoosePatient")}</div>) : tab === "payments" ? <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {([
-            ["twEstimate", ClipboardList], ["twCharges", CreditCard], ["twReceived", Wallet], ["twBalance", Scale],
-          ] as const).map(([label, Icon]) => <section key={label} className="card flex items-center gap-4 p-5">
-            <span className="rounded-xl bg-accent-soft p-3 text-accent-ink"><Icon size={22} aria-hidden="true" /></span>
-            <div><h2 className="text-xs font-medium text-muted">{t(label)}</h2><p className="mt-1 text-2xl font-semibold text-accent-ink" aria-label={t("twUnavailable")}>—</p></div>
-          </section>)}
-        </div>
-        <WorkspaceEmpty tab={tab} />
-      </div> : <WorkspaceEmpty tab={tab} />}
+      {tab === "plan" || tab === "session" || tab === "history" ? <ChartWorkspaceBoundary key={patient?.id ?? "preview"}><Suspense fallback={<p>{t("loading")}</p>}><OdontogramWorkspace key={patient?.id ?? "preview"} patientId={patient?.id} historyOnly={tab !== "plan"} showHistory={tab === "history"} onNavigate={changeTab} /></Suspense></ChartWorkspaceBoundary> : tab === "payments" ? <PaymentsWorkspace patientId={patient?.id} patientName={patient?.fullName} /> : tab === "laboratory" ? <LaboratoryWorkspace patientId={patient?.id} patientName={patient?.fullName} /> : tab === "files" ? <XrayFilesWorkspace patientId={patient?.id} patientName={patient?.fullName}/> : <WorkspaceEmpty tab={tab} />}
     </section>
   </div>;
 }

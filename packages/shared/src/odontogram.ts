@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { rateDateSchema } from "./currency.js";
+import type { Currency, ExchangeRate } from "./currency.js";
 import { procedureSchema } from "./procedures.js";
 
 export const dentitions = ["adult", "pediatric", "mixed"] as const;
@@ -111,13 +112,18 @@ export type Treatment = {
   planId?: string | null;
   discount?: Discount;
   id: string; procedureId: number; code: string; name: string;
+  requiresLab?: boolean;
   scope: string; category?: import("./procedures.js").ProcedureInput["category"]; price: string; currency: "USD"; status: TreatmentStatus;
   date: string; notes: string; teeth: ToothAssociation[];
   version: number; voidReason: string | null; replacesId: string | null;
   events: (ClinicalEvent & { status: string })[];
 };
 export type ChartData = {
+  baseCurrency?: Currency;
+  effectiveRate?: ExchangeRate | null;
   sessions?: Treatment[];
+  historyTreatments?: Treatment[];
+  plans?: { id: string; number: number; createdAt: string }[];
   plan?: { id: string; number: number; createdAt: string } | null;
   planDiscount?: { id: string; discount: Discount } | null;
   dentition: Dentition | null; toothEvents: ToothEvent[]; findings: Finding[]; treatments: Treatment[];

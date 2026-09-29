@@ -1,24 +1,26 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, CalendarDays, CreditCard, Pencil, Trash2 } from "lucide-react";
-import { clinicDate, moneyCents, moneyString, treatmentNet, discountCents, noDiscount, type Discount, type Treatment, type ChartData } from "@clinic/shared";
+import { clinicDate, moneyCents, treatmentNet, discountCents, noDiscount, type Discount, type Treatment, type ChartData } from "@clinic/shared";
 import { Button, ErrorMessage, Field } from "../../components/ui";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { DiscountFields } from "./DiscountFields";
 import { errorKey } from "../../lib/api";
 
 export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, canDelete, onAdd, onNavigate,
-  procedureInput, busy, addDisabled, planDiscount, onUpdate, plan, onNewPlan }: {
+  procedureInput, busy, addDisabled, planDiscount, onUpdate, plan, onNewPlan, formatMoney }: {
   plan: ChartData["plan"]; onNewPlan: () => void;
   treatments: Treatment[]; selected: number[]; canAdd: boolean; canModify: boolean; canDelete: boolean;
   onAdd: () => void; procedureInput: ReactNode; busy: boolean; addDisabled: boolean;
   planDiscount: ChartData["planDiscount"];
+  formatMoney: (amount: bigint) => string;
   onUpdate: (path: string, body: unknown, method?: string) => Promise<void>;
   onNavigate?: (tab: "session" | "payments" | "history") => void;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<Treatment | null>(null);
   const [deleting, setDeleting] = useState<Treatment | null>(null);
+  const [confirmNewPlan, setConfirmNewPlan] = useState(false);
   const [rowDiscount, setRowDiscount] = useState<Discount>(noDiscount);
   const [date, setDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -27,7 +29,15 @@ export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, ca
   const [totalVersion, setTotalVersion] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [sort, setSort] = useState<"tooth" | "procedure" | "status" | "price">("tooth");
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
   const active = treatments.filter((r) => !r.voidReason && r.status !== "cancelled");
+  const sorted = [...active].sort((a, b) => {
+    let comparison = 0;
+    if (sort === "price") { const left = treatmentNet(a); const right = treatmentNet(b); comparison = left < right ? -1 : left > right ? 1 : 0; }
+    else { const value = (row: Treatment) => sort === "tooth" ? row.teeth.map((item) => item.tooth).sort((x,y) => x-y).join(",") : sort === "procedure" ? `${row.code} ${row.name}`.toLocaleLowerCase() : row.status; comparison = value(a).localeCompare(value(b), undefined, { numeric: true }); }
+    return direction === "asc" ? comparison : -comparison;
+  });
   const subtotal = active.reduce((sum,r) => sum + treatmentNet(r), 0n);
   const planReduction = discountCents(subtotal, planDiscount?.discount);
   const net = subtotal - planReduction;
@@ -39,6 +49,8 @@ export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, ca
     finally { setPending(false); }
   }
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
+    {confirmNewPlan && <ConfirmDialog title={t("planNewConfirmTitle")} message={t("planNewConfirmMessage")} confirmLabel={t("planNewConfirmAction")} tone="primary" pending={disabled}
+      onCancel={() => setConfirmNewPlan(false)} onConfirm={() => { onNewPlan(); setConfirmNewPlan(false); }} />}
     {deleting && <ConfirmDialog message={t("planDeleteConfirm", { name: deleting.name })} pending={pending} error={error}
       onCancel={() => { setDeleting(null); setError(""); }}
       onConfirm={() => void save("treatments/" + deleting.id, { reason: t("planDeleteReason"), date: clinicDate() }, "DELETE")} />}
@@ -48,7 +60,7 @@ export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, ca
         <div className="mb-3 flex items-center justify-between gap-2">
           <div><h2 className="font-semibold">{t("twTreatmentPlan")}</h2>
             {plan && <p className="mt-1 text-xs text-muted">{t("planNumber", { number: plan.number })}</p>}</div>
-          {canAdd && <Button disabled={disabled} className="!min-h-0 !px-3 !py-2 text-xs" onClick={onNewPlan}><Plus size={15}/>{t("planNew")}</Button>}
+          {canAdd && <Button disabled={disabled} className="!min-h-0 !px-3 !py-2 text-xs" onClick={() => setConfirmNewPlan(true)}><Plus size={15}/>{t("planNew")}</Button>}
         </div>
         {canAdd && <fieldset disabled={disabled} className="flex items-center gap-2">
           {procedureInput}
@@ -58,13 +70,13 @@ export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, ca
       </div>
       <div className="max-h-[420px] flex-1 overflow-auto">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-soft text-muted"><tr>{["twTooth","twProcedure","twStatus","twNetPrice","patientActions"].map((key)=><th key={key} className="px-3 py-2 font-medium">{t(key)}</th>)}</tr></thead>
-          <tbody>{active.map((r)=><Fragment key={r.id}><tr className="border-t border-line">
+          <thead className="sticky top-0 bg-soft text-muted"><tr>{([['tooth','twTooth'],['procedure','twProcedure'],['status','twStatus'],['price','twNetPrice']] as const).map(([column,key])=><th key={column} aria-sort={sort === column ? direction === "asc" ? "ascending" : "descending" : "none"} className="px-3 py-2 font-medium"><button type="button" className="inline-flex items-center gap-1" onClick={() => { setDirection(sort === column && direction === "asc" ? "desc" : "asc"); setSort(column); }}>{t(key)}<span aria-hidden="true">{sort === column ? direction === "asc" ? "↑" : "↓" : "↕"}</span></button></th>)}<th className="px-3 py-2 font-medium">{t("patientActions")}</th></tr></thead>
+          <tbody>{sorted.map((r)=><Fragment key={r.id}><tr className="border-t border-line">
             <td className="px-3 py-2">{r.teeth.map((a)=>a.tooth).join(", ") || t("procedureScope_whole_mouth")}</td>
             <td className="px-3 py-2"><span className="font-medium">{r.name}</span><span className="mt-1 block text-[10px] text-muted">{r.code} · {r.date}</span>
               {r.notes && <p className="mt-1 whitespace-pre-wrap text-muted">{r.notes}</p>}</td>
             <td className="px-3 py-2"><span className="whitespace-nowrap rounded bg-accent-soft px-2 py-1 text-accent-ink">{t("odStatus_"+r.status)}</span></td>
-            <td className="whitespace-nowrap px-3 py-2 text-right"><span>{moneyString(treatmentNet(r))} USD</span>
+            <td className="whitespace-nowrap px-3 py-2 text-right"><span>{formatMoney(treatmentNet(r))}</span>
 </td>
             <td className="px-2 py-2"><div className="flex gap-1">
               {canModify && <button aria-label={t("planEdit")} title={t(r.status === "planned" ? "planEdit" : "planEditLocked")}
@@ -89,7 +101,7 @@ export function TreatmentPlanPanel({ treatments, selected, canAdd, canModify, ca
       </div>
       <div className="border-t border-line px-4 py-3 text-sm">
         <div className="mt-3 flex items-center justify-between gap-2 rounded-lg bg-accent-soft p-3 font-semibold text-accent-ink">
-          <span>{t("planEstimatedTotal")}</span><span>{moneyString(net)} USD</span>
+          <span>{t("planEstimatedTotal")}</span><span>{formatMoney(net)}</span>
           {canModify && <button aria-label={t("planEditTotal")} title={t("planEditTotal")} disabled={disabled} className="rounded p-2"
             onClick={() => { setTotalDiscount(planDiscount?.discount ?? noDiscount); setTotalVersion(planDiscount?.id ?? null); setTotalEdit(true); setError(""); }}><Pencil size={16}/></button>}
         </div>

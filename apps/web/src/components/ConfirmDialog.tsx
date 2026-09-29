@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 
-export function ConfirmDialog({ message, pending, error, onCancel, onConfirm }: {
-  message: string; pending: boolean; error?: string; onCancel: () => void; onConfirm: () => void;
+export function ConfirmDialog({ message, pending, error, title, confirmLabel, tone = "danger", onCancel, onConfirm }: {
+  message: string; pending: boolean; error?: string; title?: string; confirmLabel?: string; tone?: "danger" | "primary";
+  onCancel: () => void; onConfirm: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const { t } = useTranslation();
@@ -16,13 +17,13 @@ export function ConfirmDialog({ message, pending, error, onCancel, onConfirm }: 
   return <dialog ref={ref} aria-labelledby="delete-title" aria-describedby="delete-message"
     onCancel={(event) => { event.preventDefault(); if (!pending) onCancel(); }}
     className="m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-line bg-surface p-6 text-ink shadow-xl backdrop:bg-black/50">
-    <span className="mb-4 inline-flex rounded-full bg-danger-soft p-3 text-danger-ink"><Trash2 size={24} aria-hidden="true" /></span>
-    <h2 id="delete-title" className="text-xl font-semibold">{t("patientDeleteTitle")}</h2>
+    <span className={`mb-4 inline-flex rounded-full p-3 ${tone === "danger" ? "bg-danger-soft text-danger-ink" : "bg-accent-soft text-accent-ink"}`}>{tone === "danger" ? <Trash2 size={24} aria-hidden="true" /> : <AlertTriangle size={24} aria-hidden="true" />}</span>
+    <h2 id="delete-title" className="text-xl font-semibold">{title ?? t("patientDeleteTitle")}</h2>
     <p id="delete-message" className="mt-3 text-sm leading-6 text-muted">{message}</p>
     {error && <p role="alert" className="mt-4 text-sm text-danger-ink">{error}</p>}
     <div className="mt-6 flex justify-end gap-3">
       <button type="button" autoFocus disabled={pending} onClick={onCancel} className="rounded-lg border border-line px-4 py-3 text-sm font-semibold hover:bg-soft">{t("patientCancel")}</button>
-      <button type="button" disabled={pending} onClick={onConfirm} className="rounded-lg bg-red-700 px-4 py-3 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-50">{t(pending ? "patientDeleting" : "patientDelete")}</button>
+      <button type="button" disabled={pending} onClick={onConfirm} className={`rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 ${tone === "danger" ? "bg-red-700 hover:bg-red-800" : "bg-accent-solid hover:opacity-90"}`}>{pending ? t("saving") : confirmLabel ?? t("patientDelete")}</button>
     </div>
   </dialog>;
 }

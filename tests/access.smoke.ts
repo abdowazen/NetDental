@@ -1,8 +1,9 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile, readdir, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, readdir, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { resolve, join } from "node:path";
+import { tmpdir } from "node:os";
 import { PrismaClient } from "@prisma/client";
 import { hash } from "argon2";
 import { chromium, expect } from "@playwright/test";
@@ -10,6 +11,11 @@ import { buildApp, passwordOptions } from "../apps/api/src/app";
 import { prismaStore } from "../apps/api/src/store";
 import { readConfig } from "../apps/api/src/config";
 import { checkOdontogram } from "./odontogram.checks";
+import { checkPayments } from "./payments.checks";
+import { checkLaboratory } from "./laboratory.checks";
+import { checkPatientFiles } from "./patient-files.checks";
+import { checkDashboard } from "./dashboard.checks";
+import { checkReports } from "./reports.checks";
 import {
   clinicDate,
   type ManagedUserInput,
@@ -22,6 +28,7 @@ url.searchParams.set("connection_limit", "4");
 const adminDb = new PrismaClient();
 const db = new PrismaClient({ datasourceUrl: url.toString() });
 const origin = "http://127.0.0.1:14321";
+const patientFilesDir = await mkdtemp(join(tmpdir(), "netdental-files-"));
 const headers = { origin, "x-clinic-request": "1" };
 const app = await buildApp(
   prismaStore(db),
@@ -29,6 +36,7 @@ const app = await buildApp(
     DATABASE_URL: url.toString(),
     APP_ORIGIN: origin,
     WEB_DIST: resolve("apps/web/dist"),
+    PATIENT_FILES_DIR: patientFilesDir,
   }),
 );
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
@@ -120,6 +128,17 @@ try {
   }
   const staffCookie = await login("staffuser");
   const sh = { ...headers, cookie: staffCookie, "x-clinic-room": "1" };
+  const clientLog = await app.inject({
+    method: "POST",
+    url: "/api/system-logs/client",
+    headers: sh,
+    payload: { code: "TEST_CLIENT_ERROR", message: "Test client runtime error", path: "/dashboard" },
+  });
+  assert.equal(clientLog.statusCode, 201, clientLog.body);
+  assert.equal((await app.inject({ url: "/api/admin/system-logs", headers: sh })).statusCode, 403);
+  const systemLogs = await app.inject({ url: "/api/admin/system-logs?page=1&pageSize=30&source=client", headers: ah });
+  assert.equal(systemLogs.statusCode, 200, systemLogs.body);
+  assert.equal(systemLogs.json().logs[0].code, "TEST_CLIENT_ERROR");
   const patientInput = {
     firstName: "RoomOne",
     lastName: "Patient",
@@ -278,6 +297,13 @@ try {
     (await app.inject({ url: "/currencies", headers: sh })).statusCode,
     403,
   );
+  const staffBaseCurrency = await app.inject({ url: "/api/base-currency", headers: sh });
+  assert.equal(staffBaseCurrency.statusCode, 200);
+  assert.equal(staffBaseCurrency.json().baseCurrency, "USD");
+  assert.equal(
+    (await app.inject({ url: "/api/base-currency", headers: { ...sh, "x-clinic-room": "999999" } })).statusCode,
+    403,
+  );
   assert.equal(
     (
       await app.inject({
@@ -320,6 +346,11 @@ try {
   assert.equal((await app.inject({ method: "PUT", url: `/api/procedures/${procedureId}`, headers: procedureHeaders, payload: { ...procedureInput, defaultPrice: "0" } })).json().procedure.defaultPrice, "0.00");
   assert.equal((await app.inject({ method: "PATCH", url: `/api/procedures/${procedureId}/status`, headers: procedureHeaders, payload: { active: false } })).json().procedure.active, false);
   await checkOdontogram(app, db, patient.id, 1, procedureHeaders, room.id, sh);
+  await checkPayments(app, db, patient.id, procedureHeaders, room.id, sh);
+  await checkLaboratory(app, db, patient.id, procedureHeaders, room.id, sh);
+  await checkPatientFiles(app, db, patient.id, procedureHeaders, room.id, sh);
+  await checkDashboard(app, procedureHeaders);
+  await checkReports(app, procedureHeaders, sh, room.id);
   browser = await chromium.launch({ headless: true, channel: "msedge" });
   const page = await browser.newPage({
     viewport: { width: 1500, height: 1000 },
@@ -340,15 +371,65 @@ try {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
     page.getByRole("heading", {
-      name: "Administration",
+      name: "Users",
       exact: true,
       level: 2,
     }),
   ).toBeVisible();
+  await expect(page.getByLabel("Base currency: USD", { exact: true })).toHaveText("USD");
+  await expect(page.getByRole("button", { name: "Administration", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Clinic overview", exact: true })).toBeVisible();
+  await expect(page.getByText("Needs attention", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Recent patients", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New patient", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open treatment", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Monthly", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("img", { name: "Patient registration trend", exact: true })).toBeVisible();
+  await expect(page.getByText("Patient registrations by week for the current month", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Yearly", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Yearly", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Patient registrations by month for the current year", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reports & Analytics", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "Patients Statement — Coming soon", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Lab Statement — Coming soon", exact: true })).toBeDisabled();
+  await page.getByRole("link", { name: "New Patients", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New Patients", exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Patient registration trend", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Monthly", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const excelDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export to Excel", exact: true }).click();
+  const excelDownload = await excelDownloadPromise;
+  assert.match(excelDownload.suggestedFilename(), /^new-patients-monthly-\d{4}-\d{2}\.xlsx$/);
+  assert.equal((await readFile(await excelDownload.path())).subarray(0, 2).toString(), "PK");
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export to PDF", exact: true }).click();
+  const pdfDownload = await pdfDownloadPromise;
+  assert.match(pdfDownload.suggestedFilename(), /^new-patients-monthly-\d{4}-\d{2}\.pdf$/);
+  assert.equal((await readFile(await pdfDownload.path())).subarray(0, 4).toString(), "%PDF");
+  await page.getByRole("button", { name: "Daily", exact: true }).click();
+  await expect(page.getByLabel("Select date", { exact: true })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: /Registered at/ })).toHaveAttribute("aria-sort", "descending");
+  const settingsMenu = page.getByRole("button", { name: "Settings", exact: true });
+  await settingsMenu.click();
+  await expect(settingsMenu).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("link", { name: "General Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "General Settings", exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Currencies & exchange rates", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Currency Setup", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Currency Setup", exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Currencies & exchange rates", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Backup & Restore — Coming soon", exact: true })).toBeDisabled();
+  await page.getByRole("link", { name: "Help", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Current system behavior", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Future behavior", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Users", exact: true }).click();
   await page.getByRole("button", { name: "New user", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Screen permissions" }),
   ).toBeVisible();
+  await page.getByRole("link", { name: "Clinics & surgical rooms", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Clinics & surgical rooms", exact: true, level: 2 })).toBeVisible();
   await page
     .getByLabel("New clinic name", { exact: true })
     .fill("Browser Clinic");
@@ -358,8 +439,19 @@ try {
     .getByRole("button", { name: "Save", exact: true })
     .click();
   await expect(page.locator('input[value="Browser Clinic"]')).toBeVisible();
+  await page.getByRole("link", { name: "System Logs", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "System Logs", exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByText("Test client runtime error", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Treatment workspace", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plan estimate", exact: true })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Payments", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Payments", exact: true })).toBeVisible();
+  await expect(page.getByText("No patient selected", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel("Amount paid", { exact: true })).toBeDisabled();
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(page.getByText("Select a patient", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Treatment plan", { exact: true })).toHaveValue("all");
+  await expect(page.getByText("No matching treatment found.", { exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "Sessions", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Add session procedure", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add procedure", exact: true })).toHaveCount(0);
@@ -397,6 +489,10 @@ try {
   const chartBounds = await page.getByRole("heading", { name: "Odontogram", exact: true }).locator("xpath=ancestor::section[1]").boundingBox();
   const planBounds = await page.getByRole("heading", { name: "Treatment plan", exact: true }).locator("xpath=ancestor::section[1]").boundingBox();
   assert.ok(chartBounds && planBounds && Math.abs(chartBounds.height - planBounds.height) < 2);
+  const treatmentPlan = page.getByRole("heading", { name: "Treatment plan", exact: true }).locator("xpath=ancestor::section[1]");
+  await expect(treatmentPlan.getByRole("columnheader", { name: /Tooth/ })).toHaveAttribute("aria-sort", "ascending");
+  await treatmentPlan.getByRole("button", { name: /Procedure/ }).click();
+  await expect(treatmentPlan.getByRole("columnheader", { name: /Procedure/ })).toHaveAttribute("aria-sort", "ascending");
   assert.equal(await picker.locator(".grid").evaluateAll((rows) => rows.every((row) => row.scrollWidth <= row.clientWidth + 1)), true);
   await picker.getByRole("button", { name: /^Tooth 55 / }).click();
   await expect(page.getByRole("status").filter({ hasText: "Selected teeth: 55" })).toBeVisible();
@@ -446,6 +542,8 @@ try {
   await page.getByRole("button", { name: "Remove plan discount", exact: true }).click();
   await expect(page.getByText("Plan discount (10.00%)", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "New Plan", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Create a new treatment plan?", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Create new plan", exact: true }).click();
   await expect(page.getByText("Plan 3", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit procedure", exact: true })).toHaveCount(0);
   await picker.getByRole("button", { name: /^Tooth 16 / }).click();
@@ -484,6 +582,9 @@ try {
   const heightBeforeMenu = (await sessionRow.boundingBox())!.height;
   await sessionRow.getByRole("button", { name: "Actions for Test root canal", exact: true }).click();
   assert.equal((await sessionRow.boundingBox())!.height, heightBeforeMenu);
+  await expect(page.getByRole("button", { name: "Open laboratory request", exact: true })).toBeVisible();
+  const sessionActions = page.locator('[popover][aria-label="Actions for Test root canal"] button');
+  assert.equal((await sessionActions.last().textContent())?.trim(), "Void with reason");
   await page.getByRole("button", { name: "In progress", exact: true }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("No matching treatment found.", { exact: true })).toBeVisible();
@@ -494,9 +595,63 @@ try {
   await page.getByRole("tab", { name: "Payments", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Plan estimate", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Patient balance", exact: true })).toBeVisible();
+  await page.getByLabel("Amount paid", { exact: true }).fill("5");
+  await page.getByLabel("Payment method", { exact: true }).selectOption("card");
+  await page.getByLabel(/Notes/).fill("Card deposit");
+  await page.getByRole("button", { name: "Record payment", exact: true }).click();
+  await expect(page.getByText("Card deposit", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Payment received", exact: true }).locator("..").getByText(/5[.,]00/)).toBeVisible();
+  const accountActivity = page.getByRole("heading", { name: "Account activity", exact: true }).locator("xpath=ancestor::section[1]");
+  await expect(accountActivity.getByRole("columnheader", { name: /Date/ })).toHaveAttribute("aria-sort", "descending");
+  await accountActivity.getByRole("button", { name: /Date/ }).click();
+  await expect(accountActivity.getByRole("columnheader", { name: /Date/ })).toHaveAttribute("aria-sort", "ascending");
   await expect(page.getByRole("heading", { name: "Odontogram", exact: true })).toHaveCount(0);
-  await page.getByRole("tab", { name: "Payments", exact: true }).press("ArrowRight");
+  await page.getByRole("tab", { name: "Sessions", exact: true }).click();
+  await page.getByRole("tab", { name: "Sessions", exact: true }).press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Laboratory", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Laboratory", exact: true })).toBeVisible();
+  await expect(page.getByText("Cedar Lab", { exact: true }).first()).toBeVisible();
+  const labRow = page.getByRole("cell", { name: "Requested", exact: true }).locator("..");
+  await expect(labRow).toContainText("Requested");
+  await labRow.getByRole("button", { name: "Actions for Test root canal", exact: true }).click();
+  await page.getByRole("button", { name: "Mark received", exact: true }).click();
+  await expect(page.getByRole("dialog").getByLabel("Received date", { exact: true })).toHaveValue(clinicDate());
+  await page.getByRole("dialog").getByRole("button", { name: "Mark received", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "Received", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "X-rays & Files", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "X-rays & Files", exact: true })).toBeVisible();
+  await expect(page.getByText("tooth-16.png", { exact: false }).first()).toBeVisible();
+  await expect(page.getByAltText("tooth-16.png")).toHaveCount(2);
+  await expect.poll(() => page.getByAltText("tooth-16.png").first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Delete tooth-16.png", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Delete patient file?", exact: true })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByText("tooth-16.png", { exact: false })).toHaveCount(0);
+  await page.getByRole("tab", { name: "History", exact: true }).click();
+  await expect(page.getByLabel("Treatment plan", { exact: true })).toHaveValue("all");
+  await expect(page.getByRole("checkbox", { name: "Group by plan", exact: true })).toBeChecked();
+  const historyFilterTops = await Promise.all([
+    page.getByLabel("Filter by tooth number or procedure", { exact: true }),
+    page.getByLabel("Treatment plan", { exact: true }),
+    page.getByRole("button", { name: "Filter status", exact: true }),
+    page.getByLabel("From date", { exact: true }),
+    page.getByLabel("To date", { exact: true }),
+  ].map(async (control) => (await control.boundingBox())!.y));
+  assert.ok(Math.max(...historyFilterTops) - Math.min(...historyFilterTops) < 2, "History filters stay on the same row");
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  const responsiveDateTops = await Promise.all([
+    page.getByLabel("From date", { exact: true }),
+    page.getByLabel("To date", { exact: true }),
+  ].map(async (control) => (await control.boundingBox())!.y));
+  assert.ok(Math.max(...responsiveDateTops) - Math.min(...responsiveDateTops) < 2, "History date filters stay together when criteria wrap");
+  await page.setViewportSize({ width: 1500, height: 1000 });
+  await expect(page.getByRole("cell", { name: /Plan 3 · From date: .* · To date: .*/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Actions for/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Existing findings & restorations", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Tooth-state history", exact: true })).toHaveCount(0);
+  await page.getByLabel("Treatment plan", { exact: true }).selectOption({ label: "Plan 1" });
+  await expect(page.getByRole("cell", { name: /Plan 1 · From date: .* · To date: .*/ })).toBeVisible();
+  await expect(page.getByText("No matching treatment found.", { exact: true })).toHaveCount(0);
   await page.getByRole("tab", { name: "Plan & Chart", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Odontogram", exact: true })).toBeVisible();
   const fallbackPage = await browser.newPage();
@@ -622,4 +777,5 @@ try {
   await db.$disconnect();
   await adminDb.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
   await adminDb.$disconnect();
+  await rm(patientFilesDir, { recursive: true, force: true });
 }

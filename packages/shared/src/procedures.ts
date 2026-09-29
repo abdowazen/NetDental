@@ -24,6 +24,14 @@ export const procedureSchema = z.object({
   dentition: z.enum(procedureDentitions),
   scope: z.enum(procedureScopes),
   requiresLab: z.boolean(),
+  labLaboratory: z.string().trim().max(150, "fieldTooLong").default(""),
+  labDefaultCost: z.string().trim().regex(/^\d{1,10}(\.\d{1,2})?$/, "procedurePriceInvalid").default("0").transform((value) => {
+    const [whole, fraction = ""] = value.split("."); return `${BigInt(whole)}.${fraction.padEnd(2, "0")}`;
+  }),
+  labTurnaroundDays: z.coerce.number().int().min(0).max(365).default(0),
+  labMaterial: z.string().trim().max(100, "fieldTooLong").default(""),
+  labShade: z.string().trim().max(40, "fieldTooLong").default(""),
+  labInstructions: z.string().trim().max(2000, "fieldTooLong").default(""),
   chartIndicator: z.enum(chartIndicators),
   active: z.boolean(),
 }).strict();

@@ -10,3 +10,4 @@ test-artifacts/
 playwright-report/
 *.log
 .runtime/
+data/patient-files/

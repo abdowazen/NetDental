@@ -19,7 +19,6 @@ const button = element("retry") as HTMLButtonElement;
 function render(failed: boolean) {
   document.documentElement.lang = state.language;
   document.title = state.strings.appName;
-  element("brand").textContent = state.strings.appName;
   element("title").textContent =
     state.strings[failed ? "connectionTitle" : "connecting"];
   element("description").textContent =

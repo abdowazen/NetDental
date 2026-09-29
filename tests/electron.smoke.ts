@@ -78,12 +78,12 @@ try {
   await page.getByRole("button", { name: "Hide password" }).click();
   await page.getByLabel("Password", { exact: true }).press("Enter");
   await expect(
-    page.getByRole("heading", { name: "Your workspace is ready" }),
+    page.getByRole("heading", { name: "Clinic overview" }),
   ).toBeVisible();
   await page.screenshot({ path: ".runtime/dashboard.png" });
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Your workspace is ready" }),
+    page.getByRole("heading", { name: "Clinic overview" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Patients — Coming soon" }),

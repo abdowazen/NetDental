@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronsUpDown } from "lucide-react";
 import type { ProcedureList } from "@clinic/shared";
 
 type Procedure = ProcedureList["procedures"][number];
@@ -12,7 +13,7 @@ export function ProcedureAutocomplete({ value, search, onSearch, options, loadin
   const [active, setActive] = useState(-1);
   function choose(p: Procedure) { onSelect(p); setOpen(false); setActive(-1); }
   return <div className="relative">
-    <input id="record-procedure" className="input" role="combobox" aria-autocomplete="list" autoComplete="off"
+    <input id="record-procedure" className="input pr-10" role="combobox" aria-autocomplete="list" autoComplete="off"
       aria-expanded={open} aria-controls="procedure-options" required maxLength={100}
       aria-activedescendant={open && !loading && options[active] ? `procedure-option-${options[active].id}` : undefined}
       value={open ? search : value ? `${value.code} · ${value.name}` : search} placeholder={t("odSelectProcedure")}
@@ -25,6 +26,7 @@ export function ProcedureAutocomplete({ value, search, onSearch, options, loadin
           if (!loading) setActive((n) => e.key === "ArrowDown" ? Math.min(n + 1, options.length - 1) : Math.max(0, n - 1));
         } else if (e.key === "Enter" && open) { e.preventDefault(); if (!loading && options[active]) choose(options[active]); }
       }} />
+    <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted" size={17} aria-hidden="true" />
     {open && <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-lg border border-line bg-surface shadow-lg">
       <ul id="procedure-options" role="listbox" aria-label={t("twProcedure")} className="max-h-52 overflow-auto">
         {!loading && options.map((p, index) => <li id={`procedure-option-${p.id}`} key={p.id} role="option" aria-selected={active === index}

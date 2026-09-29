@@ -21,6 +21,10 @@
     --accent-border: 213 239 234;
     --accent-shade: 22 53 50;
     --accent-dark-border: 43 88 80;
+    --logo-start: 6 45 98;
+    --logo-end: 13 173 181;
+    --logo-brand-start: 236 254 255;
+    --logo-brand-end: 94 234 212;
     --danger-ink: 185 28 28;
     --danger-soft: 254 242 242;
     --danger-line: 254 202 202;
@@ -36,6 +40,10 @@
     --accent-border: 191 219 254;
     --accent-shade: 25 43 73;
     --accent-dark-border: 48 76 115;
+    --logo-start: 15 42 95;
+    --logo-end: 8 145 178;
+    --logo-brand-start: 239 246 255;
+    --logo-brand-end: 94 234 212;
   }
   :root[data-color="orange"] {
     --accent-solid: 194 65 12;
@@ -48,6 +56,10 @@
     --accent-border: 254 215 170;
     --accent-shade: 60 39 26;
     --accent-dark-border: 111 69 39;
+    --logo-start: 124 45 18;
+    --logo-end: 234 179 8;
+    --logo-brand-start: 255 247 237;
+    --logo-brand-end: 253 224 71;
   }
   :root[data-color="aqua-blue"] {
     --accent-solid: 54 181 197;
@@ -60,6 +72,10 @@
     --accent-border: 170 229 236;
     --accent-shade: 21 48 54;
     --accent-dark-border: 43 87 96;
+    --logo-start: 8 47 73;
+    --logo-end: 13 148 136;
+    --logo-brand-start: 236 254 255;
+    --logo-brand-end: 165 243 252;
   }
   :root[data-color="aqua-green"] {
     --accent-solid: 4 120 87;
@@ -72,6 +88,10 @@
     --accent-border: 167 243 208;
     --accent-shade: 17 49 40;
     --accent-dark-border: 31 88 65;
+    --logo-start: 5 78 65;
+    --logo-end: 8 145 178;
+    --logo-brand-start: 236 253 245;
+    --logo-brand-end: 103 232 249;
   }
   :root[data-color="purple"] {
     --accent-solid: 126 34 206;
@@ -84,6 +104,10 @@
     --accent-border: 233 213 255;
     --accent-shade: 47 33 65;
     --accent-dark-border: 88 59 116;
+    --logo-start: 76 29 149;
+    --logo-end: 219 39 119;
+    --logo-brand-start: 250 245 255;
+    --logo-brand-end: 249 168 212;
   }
   :root {
     --accent-ink: var(--accent-light);
@@ -177,18 +201,60 @@
   .eyebrow {
     @apply text-xs font-semibold tracking-[.16em] text-accent-ink;
   }
-  .brand-mark {
-    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-solid text-white;
+  .brand-logo-shell {
+    @apply flex w-full max-w-[172px] items-center justify-center;
+  }
+  .brand-logo-shell-compact {
+    @apply h-8 w-8 shrink-0;
+  }
+  .brand-logo-graphic {
+    display: block;
+    background-image: linear-gradient(
+      115deg,
+      rgb(var(--logo-start)) 12%,
+      rgb(var(--logo-end)) 88%
+    );
+    transition:
+      opacity 180ms ease,
+      transform 180ms ease;
+  }
+  .brand-logo-full {
+    width: 100%;
+    aspect-ratio: 2155 / 730;
+    -webkit-mask: url("/assets/netdenty-logo.png") center / contain no-repeat;
+    mask: url("/assets/netdenty-logo.png") center / contain no-repeat;
+  }
+  .brand-logo-mark {
+    width: 2rem;
+    height: 2rem;
+    -webkit-mask: url("/assets/netdenty-mark.png") center / contain no-repeat;
+    mask: url("/assets/netdenty-mark.png") center / contain no-repeat;
+  }
+  .sidebar .brand-logo-graphic,
+  .login-brand .brand-logo-graphic {
+    background-image: linear-gradient(
+      115deg,
+      rgb(var(--logo-brand-start)) 12%,
+      rgb(var(--logo-brand-end)) 88%
+    );
+  }
+  .brand-logo-shell:hover .brand-logo-graphic,
+  .brand-home-link:focus-visible .brand-logo-graphic {
+    opacity: 0.88;
+    transform: scale(1.015);
+  }
+  .brand-home-link {
+    @apply block w-full rounded-lg;
+  }
+  .brand-home-link:focus-visible {
+    outline: 2px solid rgb(var(--accent-bright));
+    outline-offset: 5px;
   }
   .login-grid {
     @apply grid min-h-screen bg-surface md:grid-cols-[.9fr_1.1fr];
   }
   .login-brand {
     @apply hidden flex-col justify-between bg-accent-brand p-12 text-white md:flex xl:p-16;
-  }
-  .login-brand .brand-mark,
-  .sidebar .brand-mark {
-    @apply bg-white/10;
   }
   .language-select {
     @apply cursor-pointer rounded-md border-0 bg-transparent py-2 pl-1 pr-3 text-sm disabled:opacity-50;
@@ -233,7 +299,7 @@
     }
   }
   .nav-item {
-    @apply flex min-h-12 items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-white;
+    @apply flex min-h-12 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-3 text-[13px] font-medium text-white;
   }
   a.nav-item:hover,
   button.nav-item:not(:disabled):hover {
@@ -270,3 +336,6 @@
     scroll-behavior: auto !important;
   }
 }
+  .action-menu-row:has(button[aria-expanded="true"]) {
+    background-color: rgb(var(--accent-tint));
+  }

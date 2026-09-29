@@ -1,5 +1,5 @@
 appId: com.dentalclinic.desktop
-productName: NetDental
+productName: NetDenty
 directories:
   app: .runtime/desktop
   output: release

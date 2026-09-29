@@ -54,11 +54,11 @@ await cp("apps/desktop/dist", ".runtime/desktop/dist", { recursive: true });
 await writeFile(
   ".runtime/desktop/package.json",
   JSON.stringify({
-    name: "netdental",
-    productName: "NetDental",
+    name: "netdenty",
+    productName: "NetDenty",
     version: "0.1.0",
-    description: "NetDental desktop workspace",
-    author: "NetDental",
+    description: "NetDenty desktop workspace",
+    author: "NetDenty",
     main: "dist/main.cjs",
   }),
 );

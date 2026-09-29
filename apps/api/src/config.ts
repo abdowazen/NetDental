@@ -8,6 +8,7 @@ const schema = z.object({
   COOKIE_SECURE: z.enum(["true", "false"]).default("false"),
   SESSION_HOURS: z.coerce.number().min(1).max(168).default(12),
   WEB_DIST: z.string().optional(),
+  PATIENT_FILES_DIR: z.string().min(1).optional(),
 });
 export function readConfig(env = process.env) {
   const parsed = schema.safeParse(env);

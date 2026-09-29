@@ -17,9 +17,11 @@ main {
   border-radius: 20px;
   text-align: center;
 }
-.mark {
-  font-size: 32px;
-  color: #147d70;
+.logo {
+  display: block;
+  width: min(100%, 300px);
+  height: auto;
+  margin: 0 auto 24px;
 }
 h1 {
   font-size: 26px;
