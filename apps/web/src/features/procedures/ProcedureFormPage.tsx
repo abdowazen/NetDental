@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import {
   allowed, procedureSchema, procedureCategories, procedureDentitions,
   procedureScopes, chartIndicators, type Procedure, type ProcedureInput,
-  type ProcedureList,
 } from "@clinic/shared";
 import { useAuth } from "../auth/AuthProvider";
 import { useWorkspace } from "../auth/WorkspaceProvider";
@@ -51,15 +50,9 @@ function ProcedureForm({ procedure }: { procedure?: Procedure }) {
     labMaterial: procedure?.labMaterial ?? "", labShade: procedure?.labShade ?? "", labInstructions: procedure?.labInstructions ?? "",
     chartIndicator: procedure?.chartIndicator ?? "generic", active: procedure?.active ?? true,
   };
-  const { register, handleSubmit, setError, watch, formState: { errors } } = useForm<ProcedureInput>({
+  const { register, handleSubmit, setError, formState: { errors } } = useForm<ProcedureInput>({
     resolver: zodResolver(procedureSchema), defaultValues: defaults, mode: "onTouched",
   });
-  const requiresLab = watch("requiresLab");
-  const laboratories = useQuery({
-    queryKey: ["procedures", "laboratory-options", roomId], enabled: requiresLab,
-    queryFn: ({ signal }) => api<ProcedureList>("/api/procedures?pageSize=100&sort=name&direction=asc", { signal }),
-  });
-  const laboratoryOptions = [...new Set((laboratories.data?.procedures ?? []).map((item) => item.labLaboratory).filter(Boolean))];
   const mutation = useMutation({
     mutationFn: (input: ProcedureInput) => api<{ procedure: Procedure }>(
       procedure ? `/api/procedures/${procedure.id}` : "/api/procedures",
@@ -110,17 +103,6 @@ function ProcedureForm({ procedure }: { procedure?: Procedure }) {
             <div className="sm:col-span-2 lg:col-span-3"><Field id="description" label={t("procedureDescription")} error={error("description")}><textarea id="description" rows={4} maxLength={4000} {...register("description")} {...attrs("description")} /></Field></div>
           </div>
         </section>
-        {requiresLab && <section aria-labelledby="procedure-lab-heading" className="rounded-xl border border-line bg-soft p-4">
-          <h3 id="procedure-lab-heading" className="mb-3 font-semibold">{t("procedureLabDetails")}</h3>
-          <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Field id="labLaboratory" label={t("labLaboratory")} error={error("labLaboratory")}><input id="labLaboratory" list="procedure-laboratories" maxLength={150} {...register("labLaboratory")} {...attrs("labLaboratory")} /><datalist id="procedure-laboratories">{laboratoryOptions.map((laboratory) => <option key={laboratory} value={laboratory}/>)}</datalist></Field>
-            <Field id="labDefaultCost" label={t("labDefaultCost")} error={error("labDefaultCost")}><input id="labDefaultCost" type="number" min="0" step="0.01" {...register("labDefaultCost")} {...attrs("labDefaultCost")} /></Field>
-            <Field id="labTurnaroundDays" label={t("labTurnaroundDays")} error={error("labTurnaroundDays")}><input id="labTurnaroundDays" type="number" min="0" max="365" {...register("labTurnaroundDays", { valueAsNumber: true })} {...attrs("labTurnaroundDays")} /></Field>
-            <Field id="labMaterial" label={t("labMaterial")} error={error("labMaterial")}><input id="labMaterial" maxLength={100} {...register("labMaterial")} {...attrs("labMaterial")} /></Field>
-            <Field id="labShade" label={t("labShade")} error={error("labShade")}><input id="labShade" maxLength={40} {...register("labShade")} {...attrs("labShade")} /></Field>
-            <div className="sm:col-span-2 lg:col-span-3"><Field id="labInstructions" label={t("labInstructions")} error={error("labInstructions")}><textarea id="labInstructions" rows={3} maxLength={2000} {...register("labInstructions")} {...attrs("labInstructions")} /></Field></div>
-          </div>
-        </section>}
       </fieldset>
       {mutation.error && errorKey(mutation.error) !== "CONFLICT" && <div className="mt-5"><ErrorMessage message={t(errorKey(mutation.error))} /></div>}
     </form>

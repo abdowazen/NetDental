@@ -1,17 +1,18 @@
 import type { PrismaClient } from "@prisma/client";
-import { clinicDate, convertCurrency, discountSchema, moneyCents, moneyString, selectExchangeRate, treatmentNet, type Currency, type DashboardPeriod, type DashboardSummary, type ExchangeRate } from "@clinic/shared";
+import { clinicDate, convertCurrency, discountSchema, moneyCents, moneyString, selectExchangeRate, treatmentNet, type Currency, type DashboardQuery, type DashboardSummary, type ExchangeRate } from "@clinic/shared";
 import { AccessError } from "./access.js";
 
 const day = (value: Date) => value.toISOString().slice(0, 10);
 const date = (value: string) => new Date(`${value}T00:00:00Z`);
 function signed(cents: bigint) { const negative = cents < 0n; const value = negative ? -cents : cents; return `${negative ? "-" : ""}${value / 100n}.${String(value % 100n).padStart(2, "0")}`; }
 
-export interface DashboardStore { getDashboard(roomId: number, period: DashboardPeriod): Promise<DashboardSummary>; }
+export interface DashboardStore { getDashboard(roomId: number, input: DashboardQuery): Promise<DashboardSummary>; }
 export function dashboardStore(db: PrismaClient): DashboardStore {
-  return { async getDashboard(roomId, period) {
-    const today = clinicDate(); const year = today.slice(0, 4); const month = today.slice(5, 7);
-    const startText = period === "monthly" ? `${year}-${month}-01` : `${year}-01-01`;
-    const endDate = period === "monthly" ? new Date(Date.UTC(Number(year), Number(month), 1)) : new Date(Date.UTC(Number(year) + 1, 0, 1));
+  return { async getDashboard(roomId, input) {
+    const { period } = input; const today = clinicDate(); const anchor = input.from ?? today; const year = anchor.slice(0, 4); const month = anchor.slice(5, 7);
+    const startText = input.from ?? (period === "monthly" ? `${year}-${month}-01` : `${year}-01-01`);
+    const endDate = input.to ? new Date(`${input.to}T00:00:00Z`) : period === "monthly" ? new Date(Date.UTC(Number(year), Number(month), 1)) : new Date(Date.UTC(Number(year) + 1, 0, 1));
+    if (input.to) endDate.setUTCDate(endDate.getUTCDate() + 1);
     const startDate = date(startText); const todayDate = date(today); const tomorrow = new Date(todayDate); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     const [settings, rates, treatments, allTreatments, periodPayments, allPayments, labs, completedToday, registeredPatients] = await Promise.all([
       db.currencySettings.findUnique({ where: { id: roomId } }),
@@ -50,8 +51,9 @@ export function dashboardStore(db: PrismaClient): DashboardStore {
     };
     const paymentValues = new Map(await Promise.all(allPayments.map(async (row) => [row.id, await paymentToBase(row)] as const)));
     const net = (row: typeof treatments[number]) => treatmentNet({ price: row.price.toFixed(2), discount: discountSchema.parse({ type: row.discountType, value: row.discountValue.toFixed(2) }) });
-    const bucketKeys = period === "monthly" ? Array.from({ length: 5 }, (_, i) => `W${i + 1}`) : Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
-    const bucket = (value: Date) => period === "monthly" ? `W${Math.min(5, Math.floor((value.getUTCDate() - 1) / 7) + 1)}` : day(value).slice(0, 7);
+    const customKeys: string[] = []; if (period === "custom") { const cursor = new Date(startDate); while (cursor < endDate) { customKeys.push(day(cursor)); cursor.setUTCDate(cursor.getUTCDate() + 1); } }
+    const bucketKeys = period === "monthly" ? Array.from({ length: 5 }, (_, i) => `W${i + 1}`) : period === "yearly" ? Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`) : customKeys;
+    const bucket = (value: Date) => period === "monthly" ? `W${Math.min(5, Math.floor((value.getUTCDate() - 1) / 7) + 1)}` : period === "yearly" ? day(value).slice(0, 7) : day(value);
     const buckets = new Map(bucketKeys.map((key) => [key, { key, charges: 0n, payments: 0n, labRequested: 0n, labReceived: 0n, registrations: 0 }]));
     treatments.forEach((row) => { buckets.get(bucket(row.date))!.charges += usdToBase(net(row)); });
     periodPayments.forEach((row) => { buckets.get(bucket(row.date))!.payments += paymentValues.get(row.id) ?? 0n; });

@@ -6,17 +6,22 @@ import { odontogramStore, type OdontogramStore } from "./odontogram.js";
 import { accessStore, type AccessStore } from "./access.js";
 import { paymentStore, type PaymentStore } from "./payments.js";
 import { laboratoryStore, type LaboratoryStore } from "./laboratory.js";
+import { laboratoryCatalogStore, type LaboratoryCatalogStore } from "./laboratory-catalog.js";
 import { patientFileStore, type PatientFileStore } from "./patient-files.js";
 import { dashboardStore, type DashboardStore } from "./dashboard.js";
 import { reportStore, type ReportStore } from "./reports.js";
 import { systemLogStore, type SystemLogStore } from "./system-logs.js";
+import { billCategoryStore, type BillCategoryStore } from "./bill-categories.js";
+import { billExpenseStore, type BillExpenseStore } from "./bill-expenses.js";
+import { inventoryStore, type InventoryStore } from "./inventory.js";
+import { purchaseInvoiceStore, type PurchaseInvoiceStore } from "./purchase-invoices.js";
 export type NewDentist = {
   username: string;
   passwordHash: string;
   displayName: string;
   preferredLanguage: Language;
 };
-export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore, PaymentStore, LaboratoryStore, PatientFileStore, DashboardStore, ReportStore, SystemLogStore {
+export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore, PaymentStore, LaboratoryStore, LaboratoryCatalogStore, PatientFileStore, DashboardStore, ReportStore, SystemLogStore, BillCategoryStore, BillExpenseStore, InventoryStore, PurchaseInvoiceStore {
   getBaseCurrency(roomId: number): Promise<Currency>;
   setBaseCurrency(currency: Currency, roomId: number): Promise<void>;
   listExchangeRates(year: string, roomId: number): Promise<ExchangeRate[]>;
@@ -46,10 +51,15 @@ export function prismaStore(db: PrismaClient): Store {
     ...accessStore(db),
     ...paymentStore(db),
     ...laboratoryStore(db),
+    ...laboratoryCatalogStore(db),
     ...patientFileStore(db),
     ...dashboardStore(db),
     ...reportStore(db),
     ...systemLogStore(db),
+    ...billCategoryStore(db),
+    ...billExpenseStore(db),
+    ...inventoryStore(db),
+    ...purchaseInvoiceStore(db),
     async getBaseCurrency(roomId) {
       return (
         (await db.currencySettings.findUnique({ where: { id: roomId } }))

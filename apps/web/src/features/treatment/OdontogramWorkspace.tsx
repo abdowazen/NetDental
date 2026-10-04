@@ -6,8 +6,9 @@ import { z, ZodError } from "zod";
 import {
   allTeeth, permanentTeeth, primaryTeeth, toothInfo, validSurfaces, surfaceLabel, dentitions,
   convertCurrency, latestToothStates, treatmentSchema, treatmentNet, moneyString,
-  treatmentStatusSchema, voidSchema, clinicDate, allowed,
+  treatmentStatusSchema, voidSchema, clinicDate, allowed, labShades,
   type Treatment, type ChartData, type ToothAssociation, type Dentition, type ProcedureList,
+  type LaboratoryCatalog, type LaboratoryCatalogList,
 } from "@clinic/shared";
 import { api, errorKey } from "../../lib/api";
 import { Button, ErrorMessage, Field } from "../../components/ui";
@@ -31,6 +32,7 @@ function recordStatus(record: Treatment) {
   return record.voidReason ? "voided" : record.status;
 }
 type TabNavigate = (tab: "plan" | "session" | "payments" | "laboratory" | "history") => void;
+type TreatmentKind = "unplanned" | "planned";
 
 export default function OdontogramWorkspace({ patientId, historyOnly = false, showHistory = false, onNavigate }: { patientId?: number; historyOnly?: boolean; showHistory?: boolean; onNavigate?: TabNavigate }) {
   const { t } = useTranslation();
@@ -43,7 +45,7 @@ export default function OdontogramWorkspace({ patientId, historyOnly = false, sh
   if (!patientId) return <ClinicalChart key="preview" patientId={null} data={{ dentition: null, toothEvents: [], findings: [], treatments: [] }} historyOnly={historyOnly} showHistory={showHistory} onNavigate={onNavigate} />;
   if (query.error) return <><ErrorMessage message={t(errorKey(query.error))} /><Button onClick={() => void query.refetch()}>{t("retry")}</Button></>;
   if (!query.data) return <p role="status">{t("loading")}</p>;
-  return <ClinicalChart key={`${roomId}-${patientId}-${query.data.plan?.id ?? "none"}`} patientId={patientId} data={query.data} historyOnly={historyOnly} showHistory={showHistory} onNavigate={onNavigate} />;
+  return <ClinicalChart key={`${roomId}-${patientId}`} patientId={patientId} data={query.data} historyOnly={historyOnly} showHistory={showHistory} onNavigate={onNavigate} />;
 }
 
 function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }: { patientId: number | null; data: ChartData; historyOnly: boolean; showHistory: boolean; onNavigate?: TabNavigate }) {
@@ -68,6 +70,7 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
   const [sessionPageSize, setSessionPageSize] = useState(10);
   const [historyPlan, setHistoryPlan] = useState("all");
   const [groupHistory, setGroupHistory] = useState(true);
+  const [treatmentKind, setTreatmentKind] = useState<TreatmentKind>("unplanned");
   const [filter, setFilter] = useState<Dentition>(data.dentition ?? "adult");
   const [arch, setArch] = useState("both");
   const [multi, setMulti] = useState(false);
@@ -77,6 +80,8 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
   const [view, setView] = useState<CameraView>("front");
   const [reset, setReset] = useState(0);
   const [procedure, setProcedure] = useState<ProcedureList["procedures"][number] | undefined>();
+  const [laboratory, setLaboratory] = useState<LaboratoryCatalog | undefined>();
+  const [labDetails, setLabDetails] = useState({ material: "", shade: "", instructions: "" });
   const [formKey, setFormKey] = useState(0);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
@@ -90,11 +95,23 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
     const timer = setTimeout(() => setCatalogQuery(catalogSearch.trim()), 250);
     return () => clearTimeout(timer);
   }, [catalogSearch]);
+  useEffect(() => {
+    setSessionSearch("");
+    setStatusFilter([]);
+    setDateFrom("");
+    setDateTo("");
+    setSessionPage(1);
+  }, [showHistory]);
   useEffect(() => { setSessionPage(1); }, [sessionSearch, statusFilter, dateFrom, dateTo, historyPlan, groupHistory]);
   const catalog = useQuery({
     queryKey: ["procedures", "list", roomId, "chart", catalogQuery],
     enabled: create && allowed(user, "actsProcedures") && !historyOnly,
     queryFn: ({ signal }) => api<ProcedureList>(`/api/procedures?${new URLSearchParams({ q: catalogQuery, pageSize: "100", sort: "name", direction: "asc" })}`, { signal }),
+  });
+  const laboratories = useQuery({
+    queryKey: ["laboratories", roomId, "treatment-active", procedure?.id],
+    enabled: create && !!procedure?.requiresLab && allowed(user, "laboratoriesCatalog") && !historyOnly,
+    queryFn: ({ signal }) => api<LaboratoryCatalogList>(`/api/laboratories?${new URLSearchParams({ pageSize: "100", sort: "name", direction: "asc", procedureId: String(procedure!.id) })}`, { signal }),
   });
   const mutation = useMutation({
     mutationFn: ({ path, body, method = "POST" }: { path: string; body: unknown; method?: string }) =>
@@ -118,7 +135,7 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
     .filter((id) => arch === "both" || toothInfo(id).upper === (arch === "upper"));
   const ids = selected.map((s) => s.tooth);
   const indicators: Record<number, ProcedureVisual[]> = {};
-  for (const record of data.treatments.filter((r) => !r.voidReason && r.status !== "cancelled")) {
+  for (const record of (data.sessions ?? data.treatments).filter((r) => !r.voidReason && r.status !== "cancelled")) {
     const visual = procedureVisuals[record.category ?? "other"];
     for (const association of record.teeth) {
       const list = indicators[association.tooth] ??= [];
@@ -128,7 +145,7 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
   if (procedure && procedure.scope !== "whole_mouth")
     for (const id of ids) indicators[id] = [procedureVisuals[procedure.category], ...(indicators[id] ?? []).filter((v) => v.category !== procedure.category)];
   function resetForm() {
-    setProcedure(undefined); setCatalogSearch(""); setCatalogQuery("");
+    setProcedure(undefined); setLaboratory(undefined); setLabDetails({ material: "", shade: "", instructions: "" }); setCatalogSearch(""); setCatalogQuery("");
     setCorrection(null); setError(""); setNotice(""); setFormKey((n) => n + 1);
   }
   function changeSelection(next: ToothAssociation[]) {
@@ -140,16 +157,22 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
       [...(multi ? selected : []), { tooth: id, surfaces: [], role: "target" }]);
   }
   const recorded = [...new Set([...data.findings.filter((f) => !f.voidReason).flatMap((f) => f.teeth.map((r) => r.tooth)),
-    ...data.treatments.filter((r) => !r.voidReason && r.status !== "cancelled").flatMap((r) => r.teeth.map((a) => a.tooth))])];
+    ...(data.sessions ?? data.treatments).filter((r) => !r.voidReason && r.status !== "cancelled").flatMap((r) => r.teeth.map((a) => a.tooth))])];
   const unavailable = [...states.values()].filter((r) => ["missing", "extracted", "exfoliated", "unerupted"].includes(r.state)).map((r) => r.tooth);
   const busy = mutation.isPending;
   function addProcedure() {
     const standalone = !!correction && data.sessions?.some((r) => r.id === correction && r.planId === null);
     if (!procedure) { setError(t("odSelectProcedure")); return; }
-    send(treatmentSchema, { procedureId: procedure.id, planId: standalone ? null : data.plan?.id ?? null,
+    if (procedure.requiresLab && !laboratory) { setError(t("laboratoryRequired")); return; }
+    if (!["multiple_teeth", "whole_mouth"].includes(procedure.scope) && !selected.length) { setError(t("treatmentSelectTooth")); return; }
+    const procedureTeeth = procedure.scope === "whole_mouth" ||
+      (procedure.scope === "multiple_teeth" && selected.length < 2) ? [] : selected;
+    const unplanned = treatmentKind === "unplanned" && !correction;
+    send(treatmentSchema, { procedureId: procedure.id, planId: standalone || unplanned ? null : data.plan?.id ?? null,
       mode: ["multiple_teeth", "whole_mouth"].includes(procedure.scope) ? "group" : "independent",
-      teeth: procedure.scope === "whole_mouth" ? [] : selected, date: clinicDate(), notes: "", price: procedure.defaultPrice,
-      ...(correction ? { replacesId: correction } : {}) }, standalone ? "sessions" : "treatments");
+      teeth: procedureTeeth, date: clinicDate(), notes: "", price: procedure.defaultPrice,
+      ...(laboratory ? { laboratoryId: laboratory.id, labMaterial: labDetails.material, labShade: labDetails.shade, labInstructions: labDetails.instructions } : {}),
+      ...(correction ? { replacesId: correction } : {}) }, standalone ? "sessions" : unplanned ? "completed-treatments" : "treatments");
   }
   async function updatePlan(path: string, body: unknown, method = "PUT") {
     await api("/api/odontogram/" + patientId + "/" + path, { method, body: JSON.stringify(body) });
@@ -201,8 +224,8 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
     const range = historyPlanRange(planId);
     return range ? `${historyPlanLabel(planId)} · ${t("sessionDateFrom")}: ${range.from} · ${t("sessionDateTo")}: ${range.to}` : historyPlanLabel(planId);
   };
-  function associations(rows: ToothAssociation[]) {
-    return rows.length ? rows.map((a) => `${a.tooth}${a.surfaces.length ? " (" + a.surfaces.map((s) => t("odSurface_" + surfaceLabel(a.tooth, s))).join(", ") + ")" : ""} · ${t("odRole_" + a.role)}`).join("; ") : t("procedureScope_whole_mouth");
+  function associations(rows: ToothAssociation[], scope: string) {
+    return rows.length ? rows.map((a) => `${a.tooth}${a.surfaces.length ? " (" + a.surfaces.map((s) => t("odSurface_" + surfaceLabel(a.tooth, s))).join(", ") + ")" : ""} · ${t("odRole_" + a.role)}`).join("; ") : t("procedureScope_" + scope);
   }
   const associationControls = !!selected.length && <details className="rounded-lg border border-line p-2">
           <summary className="text-sm font-semibold">{t("odSurfaces")}</summary>
@@ -280,21 +303,34 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
 
       </section>
       <div className="flex min-w-0 flex-col gap-3">
-      <TreatmentPlanPanel treatments={data.treatments} selected={ids} canAdd={create}
+      <TreatmentPlanPanel
+        treatmentKind={treatmentKind}
+        onTreatmentKindChange={(kind) => { setTreatmentKind(kind); resetForm(); }}
+        treatments={treatmentKind === "planned" ? data.treatments : (data.sessions ?? []).filter((record) => record.planId === null)}
+        selected={ids} canAdd={create}
         canModify={modify} canDelete={!!patientId && allowed(user, "treatment", "delete")}
         plan={data.plan} onNewPlan={() => mutation.mutate({ path: "plans", body: { expectedPlanId: data.plan?.id ?? null } })}
-        planDiscount={data.planDiscount} onUpdate={updatePlan} busy={busy} formatMoney={formatMoney}
-        addDisabled={!procedure || (procedure.scope !== "whole_mouth" && !ids.length)}
+        planDiscount={treatmentKind === "planned" ? data.planDiscount : data.unplannedDiscount} onUpdate={updatePlan} busy={busy} formatMoney={formatMoney}
+        addDisabled={!procedure || (procedure.requiresLab && !laboratory)}
         onAdd={() => addProcedure()} onNavigate={onNavigate}
-        procedureInput={<div className="min-w-0 flex-1">
-          <label className="sr-only" htmlFor="record-procedure">{t("twProcedure")}</label>
+        procedureInput={<div className="min-w-0">
+          <label className="mb-2 block text-sm font-medium" htmlFor="record-procedure">{t("twProcedure")}</label>
           <ProcedureAutocomplete key={formKey} value={procedure} search={catalogSearch}
-            onSearch={(value) => { setCatalogSearch(value); setProcedure(undefined); }}
+            onSearch={(value) => { setCatalogSearch(value); setProcedure(undefined); setLaboratory(undefined); setLabDetails({ material: "", shade: "", instructions: "" }); }}
             options={catalog.data?.procedures.filter((p) => p.active) ?? []}
             loading={catalog.isFetching || catalogSearch.trim() !== catalogQuery}
-            onSelect={setProcedure} />
-        </div>} />
-      {catalog.error && <ErrorMessage message={t(errorKey(catalog.error))} />}
+            onSelect={(value) => { setProcedure(value); setLaboratory(undefined); setLabDetails({ material: "", shade: "", instructions: "" }); }} />
+        </div>}
+        laboratoryDetails={procedure?.requiresLab ? <section className="mt-3 rounded-xl border border-accent-line bg-accent-soft/40 p-3">
+          <div className="mb-3"><h3 className="text-sm font-semibold">{t("treatmentLaboratoryDetails")}</h3><p className="text-xs text-muted">{laboratory ? t("treatmentLaboratoryDetailsHint", { laboratory: laboratory.name }) : t("treatmentSelectLaboratoryHint")}</p></div>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
+            <div className="sm:col-span-2"><Field id="record-laboratory" label={`${t("labLaboratory")} *`}><select id="record-laboratory" className="input" required aria-required="true" disabled={laboratories.isFetching} value={laboratory?.id ?? ""} onChange={(event) => { const selectedLaboratory = laboratories.data?.laboratories.find((item) => item.id === Number(event.target.value)); setLaboratory(selectedLaboratory); setLabDetails(selectedLaboratory ? { material: selectedLaboratory.material, shade: selectedLaboratory.shade, instructions: selectedLaboratory.instructions } : { material: "", shade: "", instructions: "" }); }}><option value="">{t("selectLaboratory")}</option>{(laboratories.data?.laboratories ?? []).filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field></div>
+            <Field id="treatment-lab-material" label={t("labMaterial")}><input id="treatment-lab-material" className="input" disabled={!laboratory} maxLength={100} value={labDetails.material} onChange={(event) => setLabDetails((old) => ({ ...old, material: event.target.value }))}/></Field>
+            <Field id="treatment-lab-shade" label={t("labShade")}><select id="treatment-lab-shade" className="input" disabled={!laboratory} value={labDetails.shade} onChange={(event) => setLabDetails((old) => ({ ...old, shade: event.target.value }))}><option value="">—</option>{labShades.map((shade) => <option key={shade}>{shade}</option>)}</select></Field>
+            <div className="sm:col-span-2"><Field id="treatment-lab-instructions" label={t("labInstructions")}><textarea id="treatment-lab-instructions" className="input" disabled={!laboratory} rows={2} maxLength={2000} value={labDetails.instructions} onChange={(event) => setLabDetails((old) => ({ ...old, instructions: event.target.value }))}/></Field></div>
+          </div>
+        </section> : undefined} />
+      {(catalog.error || laboratories.error) && <ErrorMessage message={t(errorKey(catalog.error ?? laboratories.error))} />}
       {create && !allowed(user, "actsProcedures") && <p className="text-xs text-muted">{t("odCatalogPermission")}</p>}
       {procedure && <p className="text-xs text-muted">{t("procedureScope_" + procedure.scope)} ? {t(["multiple_teeth", "whole_mouth"].includes(procedure.scope) ? "odGroupHint" : "odIndependentHint", { count: ids.length })}</p>}
       {correction && <p className="text-xs">{t("odCorrecting")}: {correction}<button onClick={() => setCorrection(null)} className="ml-2 underline">{t("patientCancel")}</button></p>}
@@ -338,7 +374,7 @@ function ClinicalChart({ patientId, data, historyOnly, showHistory, onNavigate }
             </FloatingDropdown>}
           </td>}
           <td className="p-3"><strong>{record.code} · {record.name}</strong>          </td>
-          <td className="max-w-xs p-3">{associations(record.teeth)}</td>
+          <td className="max-w-xs p-3">{associations(record.teeth, record.scope)}</td>
           <td className="p-3"><span className={"inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold " + (actionColors[recordStatus(record)] ?? actionColors.planned)}>{t("odStatus_" + recordStatus(record))}</span></td>
           <td className="p-3">{record.date}</td><td className="whitespace-nowrap p-3">{formatMoney(treatmentNet(record))}</td>
         </tr></Fragment>)}

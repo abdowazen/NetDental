@@ -8,45 +8,71 @@ import {
   type ManagedUser,
   type ManagedUserInput,
   type Clinic,
+  type Screen,
+  type Action,
 } from "@clinic/shared";
 import { api, errorKey } from "../../lib/api";
 import { Button, ErrorMessage } from "../../components/ui";
+import { ArrowLeft, Eye, EyeOff, Pencil, Plus } from "lucide-react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+
+type PermissionTreeRow =
+  | { kind: "group"; label: string; depth: number }
+  | { kind: "screen"; screen: Screen; label?: string; depth: number };
+
+const permissionTreeRows: PermissionTreeRow[] = [
+  { kind: "screen", screen: "dashboard", depth: 0 },
+  { kind: "group", label: "clinical", depth: 0 },
+  { kind: "screen", screen: "patients", depth: 1 },
+  { kind: "screen", screen: "treatment", depth: 1 },
+  { kind: "screen", screen: "payments", depth: 2 },
+  { kind: "group", label: "actsProcedures", depth: 1 },
+  { kind: "screen", screen: "actsProcedures", label: "procedures", depth: 2 },
+  { kind: "screen", screen: "laboratoriesCatalog", depth: 2 },
+  { kind: "group", label: "billingPayments", depth: 0 },
+  { kind: "screen", screen: "billsPayments", depth: 1 },
+  { kind: "screen", screen: "billsCategories", depth: 1 },
+  { kind: "group", label: "inventory", depth: 0 },
+  { kind: "screen", screen: "purchaseInvoice", depth: 1 },
+  { kind: "screen", screen: "suppliesMaterials", depth: 1 },
+  { kind: "screen", screen: "suppliersVendors", depth: 1 },
+  { kind: "group", label: "analytics", depth: 0 },
+  { kind: "group", label: "analyticsClinical", depth: 1 },
+  { kind: "screen", screen: "reportNewPatients", depth: 2 },
+  { kind: "screen", screen: "reportPatientsStatement", depth: 2 },
+  { kind: "screen", screen: "reportLabStatement", depth: 2 },
+  { kind: "group", label: "analyticsBilling", depth: 1 },
+  { kind: "screen", screen: "reportBillingPayments", label: "billingAnalyticsReport", depth: 2 },
+  { kind: "group", label: "analyticsInventory", depth: 1 },
+  { kind: "screen", screen: "reportInventoryAnalytics", label: "inventoryAnalyticsReport", depth: 2 },
+  { kind: "group", label: "settings", depth: 0 },
+  { kind: "screen", screen: "settings", label: "generalSettings", depth: 1 },
+  { kind: "screen", screen: "currencySetup", depth: 1 },
+  { kind: "screen", screen: "backupRestore", depth: 1 },
+  { kind: "screen", screen: "help", depth: 1 },
+];
 
 export function UsersAdminPage() {
   const { t } = useTranslation();
-  const client = useQueryClient();
-  const [selected, setSelected] = useState<ManagedUser | null | undefined>(
-    undefined,
-  );
   const users = useQuery({
     queryKey: ["admin", "users"],
     queryFn: () => api<{ users: ManagedUser[] }>("/api/admin/users"),
   });
-  const clinics = useQuery({
-    queryKey: ["admin", "clinics"],
-    queryFn: () => api<{ clinics: Clinic[] }>("/api/admin/clinics"),
-  });
-  async function refresh() {
-    await Promise.all([
-      client.invalidateQueries({ queryKey: ["admin"] }),
-      client.invalidateQueries({ queryKey: ["session"] }),
-    ]);
-  }
   return (
     <>
-      <p className="eyebrow">{t("administration")}</p>
-      <h2 className="mb-6 mt-3 text-3xl font-semibold">{t("manageUsers")}</h2>
-      {(users.error || clinics.error) && (
-        <ErrorMessage message={t(errorKey(users.error ?? clinics.error))} />
-      )}
-      <section className="card p-6">
-        <div className="flex items-center justify-end gap-3">
-          <Button onClick={() => setSelected(null)}>{t("newUser")}</Button>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">{t("administration")}</p>
+          <h2 className="mt-3 text-3xl font-semibold">{t("manageUsers")}</h2>
         </div>
+        <Link className="button" to="/admin/users/new"><Plus size={18} aria-hidden="true"/>{t("newUser")}</Link>
+      </header>
+      {users.error && <ErrorMessage message={t(errorKey(users.error))} />}
+      <section className="card overflow-hidden">
         {users.isPending && <p role="status">{t("loading")}</p>}
-        <div className="mt-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead>
+            <thead className="bg-soft text-muted">
               <tr>
                 {[
                   "username",
@@ -55,7 +81,7 @@ export function UsersAdminPage() {
                   "active",
                   "patientActions",
                 ].map((key) => (
-                  <th className="p-3" key={key}>
+                  <th className="px-4 py-3 font-medium" key={key}>
                     {t(key)}
                   </th>
                 ))}
@@ -63,20 +89,17 @@ export function UsersAdminPage() {
             </thead>
             <tbody>
               {users.data?.users.map((u) => (
-                <tr key={u.id} className="border-t border-line">
-                  <td className="p-3">{u.username}</td>
-                  <td className="p-3">{u.displayName}</td>
-                  <td className="p-3">
+                <tr key={u.id} className="border-t border-line hover:bg-soft/60">
+                  <td className="px-4 py-3">{u.username}</td>
+                  <td className="px-4 py-3">{u.displayName}</td>
+                  <td className="px-4 py-3">
                     {t(u.role === "ADMIN" ? "administrator" : u.role.toLowerCase())}
                   </td>
-                  <td className="p-3">{t(u.isActive ? "yes" : "no")}</td>
-                  <td className="p-3">
-                    <button
-                      className="rounded text-accent-ink underline"
-                      onClick={() => setSelected(u)}
-                    >
-                      {t("patientModify")}
-                    </button>
+                  <td className="px-4 py-3">{t(u.isActive ? "yes" : "no")}</td>
+                  <td className="px-4 py-3">
+                    <Link className="inline-flex items-center gap-2 rounded p-2 text-accent-ink hover:bg-accent-soft" to={`/admin/users/${u.id}`} aria-label={`${t("patientModify")} ${u.displayName}`}>
+                      <Pencil size={16} aria-hidden="true"/>{t("patientModify")}
+                    </Link>
                   </td>
                 </tr>
               ))}
@@ -84,20 +107,25 @@ export function UsersAdminPage() {
           </table>
         </div>
       </section>
-      {selected !== undefined && (
-        <UserEditor
-          key={selected?.id ?? "new"}
-          user={selected}
-          clinics={clinics.data?.clinics ?? []}
-          onCancel={() => setSelected(undefined)}
-          onSaved={async () => {
-            setSelected(undefined);
-            await refresh();
-          }}
-        />
-      )}
     </>
   );
+}
+
+export function UserAdminFormPage() {
+  const { id } = useParams();
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const users = useQuery({ queryKey: ["admin", "users"], queryFn: () => api<{ users: ManagedUser[] }>("/api/admin/users") });
+  const clinics = useQuery({ queryKey: ["admin", "clinics"], queryFn: () => api<{ clinics: Clinic[] }>("/api/admin/clinics") });
+  if (users.isPending || clinics.isPending) return <p role="status">{t("loading")}</p>;
+  if (users.error || clinics.error) return <ErrorMessage message={t(errorKey(users.error ?? clinics.error))}/>;
+  const user = id ? users.data.users.find((candidate) => candidate.id === id) : undefined;
+  if (id && !user) return <ErrorMessage message={t("NOT_FOUND")}/>;
+  return <UserEditor key={id ?? "new"} user={user ?? null} clinics={clinics.data.clinics} onSaved={async () => {
+    await Promise.all([client.invalidateQueries({ queryKey: ["admin"] }), client.invalidateQueries({ queryKey: ["session"] })]);
+    navigate("/admin/users");
+  }}/>;
 }
 
 export function ClinicsRoomsAdminPage() {
@@ -218,12 +246,10 @@ function LocationForm({
 function UserEditor({
   user,
   clinics,
-  onCancel,
   onSaved,
 }: {
   user: ManagedUser | null;
   clinics: Clinic[];
-  onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -245,6 +271,7 @@ function UserEditor({
     ),
   });
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const mutation = useMutation({
     mutationFn: (value: ManagedUserInput) =>
@@ -263,11 +290,30 @@ function UserEditor({
     setInvalid(!parsed.success || (!user && !password));
     if (parsed.success && (user || password)) mutation.mutate(parsed.data);
   }
-  return (
-    <form className="card mt-6 p-6" onSubmit={submit}>
-      <h3 className="mb-4 text-xl font-semibold">
-        {t(user ? "editUser" : "newUser")}
-      </h3>
+  function updatePermission(screen: Screen, action: Action, checked: boolean) {
+    setInput({
+      ...input,
+      permissions: input.permissions.map((permission) =>
+        permission.screen !== screen
+          ? permission
+          : action === "view" && !checked
+            ? { ...permission, view: false, create: false, modify: false, delete: false }
+            : { ...permission, [action]: checked },
+      ),
+    });
+  }
+  return (<>
+    <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-3 bg-canvas py-2">
+      <div>
+        <Link to="/admin/users" className="mb-2 inline-flex items-center gap-2 rounded text-sm text-accent-ink"><ArrowLeft size={18} aria-hidden="true"/>{t("manageUsers")}</Link>
+        <h2 className="text-2xl font-semibold">{t(user ? "editUser" : "newUser")}</h2>
+      </div>
+      <div className="ml-auto flex items-center gap-3">
+        <Link className="inline-flex min-h-12 items-center rounded-lg border border-line bg-surface px-5 text-sm font-semibold text-ink hover:bg-soft" to="/admin/users">{t("patientCancel")}</Link>
+        <Button type="submit" form="user-form" disabled={mutation.isPending}>{t(mutation.isPending ? "saving" : "save")}</Button>
+      </div>
+    </div>
+    <form id="user-form" className="card p-4 sm:p-5" onSubmit={submit}>
       <fieldset disabled={mutation.isPending}>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="text-sm">
@@ -297,16 +343,27 @@ function UserEditor({
           </label>
           <label className="text-sm">
             {t(user ? "optionalNewPassword" : "password")}
-            <input
-              type="password"
-              required={!user}
-              minLength={12}
-              maxLength={128}
-              autoComplete="new-password"
-              className="input mt-1"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="relative mt-1">
+              <input
+                type={passwordVisible ? "text" : "password"}
+                required={!user}
+                minLength={12}
+                maxLength={128}
+                autoComplete="new-password"
+                className="input pr-12"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="absolute right-1 top-1 rounded-md p-3 text-muted"
+                aria-label={t(passwordVisible ? "hidePassword" : "showPassword")}
+                aria-pressed={passwordVisible}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+              >
+                {passwordVisible ? <EyeOff size={18} aria-hidden="true"/> : <Eye size={18} aria-hidden="true"/>}
+              </button>
+            </div>
           </label>
           <label className="text-sm">
             {t("role")}
@@ -375,72 +432,61 @@ function UserEditor({
             <h4 className="mb-3 mt-6 font-semibold">
               {t("screenPermissions")}
             </h4>
-            <div className="overflow-x-auto">
+            <div className="overflow-hidden rounded-xl border border-line">
+              <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead>
+                <thead className="bg-soft text-muted">
                   <tr>
-                    <th className="p-2">{t("screen")}</th>
+                    <th className="px-4 py-3 font-medium">{t("screen")}</th>
                     {actions.map((a) => (
-                      <th className="p-2" key={a}>
+                      <th className="px-4 py-3 text-center font-medium" key={a}>
                         {t(`permission_${a}`)}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {input.permissions.map((p) => (
-                    <tr className="border-t border-line" key={p.screen}>
-                      <td className="p-2">{t(p.screen)}</td>
-                      {actions.map((action) => (
-                        <td className="p-2" key={action}>
-                          <input
-                            type="checkbox"
-                            aria-label={`${t(p.screen)}: ${t(`permission_${action}`)}`}
-                            disabled={action !== "view" && !p.view}
-                            checked={p[action]}
-                            onChange={(e) =>
-                              setInput({
-                                ...input,
-                                permissions: input.permissions.map((item) =>
-                                  item.screen !== p.screen
-                                    ? item
-                                    : action === "view" && !e.target.checked
-                                      ? {
-                                          ...item,
-                                          view: false,
-                                          create: false,
-                                          modify: false,
-                                          delete: false,
-                                        }
-                                      : { ...item, [action]: e.target.checked },
-                                ),
-                              })
-                            }
-                          />
+                  {permissionTreeRows.map((row, index) => {
+                    if (row.kind === "group")
+                      return (
+                        <tr className="border-t border-line bg-soft" key={`group-${row.label}-${index}`}>
+                          <th colSpan={5} scope="rowgroup" className="py-2 pr-2 text-left text-sm font-semibold text-ink" style={{ paddingLeft: `${0.75 + row.depth * 1.25}rem` }}>
+                            <span className="inline-flex items-center gap-2">
+                              {row.depth > 0 && <span className="h-3 w-3 rounded-bl border-b border-l border-line" aria-hidden="true"/>}
+                              {t(row.label)}
+                            </span>
+                          </th>
+                        </tr>
+                      );
+                    const permission = input.permissions.find((item) => item.screen === row.screen)!;
+                    const label = t(row.label ?? row.screen);
+                    return (
+                      <tr className="border-t border-line" key={row.screen}>
+                        <td className="py-2 pr-2" style={{ paddingLeft: `${0.75 + row.depth * 1.25}rem` }}>
+                          <span className="inline-flex items-center gap-2">
+                            {row.depth > 0 && <span className="h-3 w-3 rounded-bl border-b border-l border-line" aria-hidden="true"/>}
+                            {label}
+                          </span>
                         </td>
-                      ))}
-                    </tr>
-                  ))}
+                        {actions.map((action) => (
+                          <td className="px-4 py-3 text-center" key={action}>
+                            <input type="checkbox" aria-label={`${label}: ${t(`permission_${action}`)}`}
+                              disabled={action !== "view" && !permission.view} checked={permission[action]}
+                              onChange={(event) => updatePermission(row.screen, action, event.target.checked)}/>
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              </div>
             </div>
           </>
         )}
       </fieldset>
       {invalid && <ErrorMessage message={t("VALIDATION_ERROR")} />}
       {mutation.error && <ErrorMessage message={t(errorKey(mutation.error))} />}
-      <div className="mt-6 flex gap-3">
-        <Button type="submit" disabled={mutation.isPending}>
-          {t(mutation.isPending ? "saving" : "save")}
-        </Button>
-        <button
-          type="button"
-          className="rounded-lg border border-line px-5 py-3 text-sm"
-          onClick={onCancel}
-        >
-          {t("patientCancel")}
-        </button>
-      </div>
     </form>
-  );
+  </>);
 }

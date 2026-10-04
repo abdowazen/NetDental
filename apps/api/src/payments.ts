@@ -34,17 +34,22 @@ export function paymentStore(db: PrismaClient): PaymentStore {
   async function context(patientId: number, roomId: number) {
     await patient(patientId, roomId);
     const plan = await db.treatmentPlan.findFirst({ where: { patientId }, orderBy: { number: "desc" } });
-    const [treatments, totalRecord, payments, base] = await Promise.all([
+    const [plannedTreatments, unplannedTreatments, totalRecord, unplannedTotalRecord, payments, base] = await Promise.all([
       plan ? db.treatment.findMany({ where: { patientId, planId: plan.id, voidReason: null, status: { not: "cancelled" } }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }) : [],
+      db.treatment.findMany({ where: { patientId, planId: null, voidReason: null, status: { not: "cancelled" } }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
       plan ? db.clinicalRecord.findFirst({ where: { patientId, planId: plan.id, kind: "plan_total" }, orderBy: { recordedAt: "desc" } }) : null,
-      db.payment.findMany({ where: { patientId, roomId, planId: plan?.id ?? null }, orderBy: [{ date: "desc" }, { recordedAt: "desc" }] }),
+      db.clinicalRecord.findFirst({ where: { patientId, planId: null, kind: "unplan_total" }, orderBy: { recordedAt: "desc" } }),
+      db.payment.findMany({
+        where: { patientId, roomId, ...(plan ? { OR: [{ planId: plan.id }, { planId: null }] } : { planId: null }) },
+        orderBy: [{ date: "desc" }, { recordedAt: "desc" }],
+      }),
       baseCurrency(roomId),
     ]);
-    return { plan, treatments, totalRecord, payments, base };
+    return { plan, plannedTreatments, unplannedTreatments, treatments: [...plannedTreatments, ...unplannedTreatments], totalRecord, unplannedTotalRecord, payments, base };
   }
   return {
     async getPayments(patientId, roomId) {
-      const { treatments, totalRecord, payments, base } = await context(patientId, roomId);
+      const { plannedTreatments, unplannedTreatments, treatments, totalRecord, unplannedTotalRecord, payments, base } = await context(patientId, roomId);
       const today = clinicDate();
       const effectiveRate = await rate(roomId, today);
       if (base === "LBP" && !effectiveRate) throw new AccessError("VALIDATION_ERROR");
@@ -52,10 +57,19 @@ export function paymentStore(db: PrismaClient): PaymentStore {
       const afterRowsUsd = treatments.reduce((sum, row) => sum + treatmentNet({
         price: row.price.toFixed(2), discount: discountSchema.parse({ type: row.discountType, value: row.discountValue.toFixed(2) }),
       }), 0n);
+      const plannedAfterRowsUsd = plannedTreatments.reduce((sum, row) => sum + treatmentNet({
+        price: row.price.toFixed(2), discount: discountSchema.parse({ type: row.discountType, value: row.discountValue.toFixed(2) }),
+      }), 0n);
+      const unplannedAfterRowsUsd = unplannedTreatments.reduce((sum, row) => sum + treatmentNet({
+        price: row.price.toFixed(2), discount: discountSchema.parse({ type: row.discountType, value: row.discountValue.toFixed(2) }),
+      }), 0n);
       const planDiscount = totalRecord
         ? discountSchema.parse((totalRecord.data as { discount: unknown }).discount)
         : { type: "amount" as const, value: "0.00" };
-      const netUsd = afterRowsUsd - discountCents(afterRowsUsd, planDiscount);
+      const unplannedDiscount = unplannedTotalRecord
+        ? discountSchema.parse((unplannedTotalRecord.data as { discount: unknown }).discount)
+        : { type: "amount" as const, value: "0.00" };
+      const netUsd = afterRowsUsd - discountCents(plannedAfterRowsUsd, planDiscount) - discountCents(unplannedAfterRowsUsd, unplannedDiscount);
       const grossBase = moneyCents(convertCurrency(moneyString(grossUsd), "USD", base, effectiveRate));
       const netBase = moneyCents(convertCurrency(moneyString(netUsd), "USD", base, effectiveRate));
       const discountBase = grossBase - netBase;

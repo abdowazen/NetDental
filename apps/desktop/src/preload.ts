@@ -10,3 +10,7 @@ contextBridge.exposeInMainWorld("clinicConnection", {
     return () => ipcRenderer.removeListener("connection:update", receive);
   },
 });
+contextBridge.exposeInMainWorld("netDentyBackup", {
+  save: (bytes: Uint8Array, suggestedName: string) =>
+    ipcRenderer.invoke("backup:save", bytes, suggestedName),
+});

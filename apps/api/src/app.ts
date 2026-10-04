@@ -19,18 +19,42 @@ import {
   procedureSchema,
   procedureSearchSchema,
   procedureStatusSchema,
+  laboratoryCatalogSchema,
+  laboratoryCatalogSearchSchema,
+  laboratoryCatalogStatusSchema,
+  laboratoryRateSchema,
+  billCategorySchema,
+  billCategorySearchSchema,
+  billCategoryStatusSchema,
+  billExpenseSchema,
+  billExpenseSearchSchema,
+  supplyItemSchema,
+  supplyItemSearchSchema,
+  inventoryOptionSearchSchema,
+  supplierSchema,
+  supplierSearchSchema,
+  supplierStatusSchema,
+  purchaseInvoiceSchema,
+  purchaseInvoiceSearchSchema,
+  labStatementQuerySchema,
+  patientStatementQuerySchema,
+  billingAnalyticsQuerySchema,
+  inventoryAnalyticsQuerySchema,
   patientSearchSchema,
   patientIdSchema,
   currencySettingsSchema,
   exchangeRateSchema,
+  rateDateSchema,
   clinicDate,
   selectExchangeRate,
   type ErrorCode,
   type User,
-  dashboardPeriodSchema,
+  dashboardQuerySchema,
   newPatientReportQuerySchema,
   clientSystemLogSchema,
   systemLogQuerySchema,
+  systemLogClearSchema,
+  systemLogIdSchema,
 } from "@clinic/shared";
 import type { User as DbUser } from "@prisma/client";
 import type { Config } from "./config.js";
@@ -41,6 +65,7 @@ import { registerPayments } from "./payment-routes.js";
 import { registerLaboratory } from "./laboratory-routes.js";
 import { registerPatientFiles } from "./patient-file-routes.js";
 import { resolve } from "node:path";
+import { DatabaseBackupError, registerDatabaseBackup } from "./database-backup.js";
 
 export const passwordOptions = {
   type: argon2id,
@@ -50,6 +75,29 @@ export const passwordOptions = {
 };
 export const digest = (token: string) =>
   createHash("sha256").update(token).digest("hex");
+function sanitizeTechnicalText(value: unknown, limit: number) {
+  const raw = typeof value === "string" ? value : String(value ?? "");
+  return raw
+    .replace(/postgres(?:ql)?:\/\/[^\s)]+/gi, "[redacted-database-url]")
+    .replace(/(authorization|cookie|password|token|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer [redacted]")
+    .replace(/(https?:\/\/[^\s?#]+)[?#][^\s)]+/gi, "$1?[redacted]")
+    .replace(/\0/g, "")
+    .slice(0, limit);
+}
+function technicalError(error: unknown) {
+  const record = error as { name?: unknown; code?: unknown; message?: unknown; stack?: unknown; technicalDetails?: unknown };
+  const name = sanitizeTechnicalText(typeof record.name === "string" ? record.name : "Error", 100);
+  const code = sanitizeTechnicalText(typeof record.code === "string" ? record.code : name || "REQUEST_FAILED", 80)
+    .replace(/[^a-zA-Z0-9_.-]/g, "_") || "REQUEST_FAILED";
+  const message = sanitizeTechnicalText(typeof record.message === "string" ? record.message : "Unexpected server error", 500) || "Unexpected server error";
+  const frames = typeof record.stack === "string"
+    ? record.stack.split(/\r?\n/).slice(1).filter((line) => /^\s*at\s/.test(line)).slice(0, 8).map((line) => sanitizeTechnicalText(line.trim(), 350))
+    : [];
+  const suppliedDetails = typeof record.technicalDetails === "string" ? sanitizeTechnicalText(record.technicalDetails, 3000) : "";
+  const details = [`Error name: ${name}`, `Error code: ${code}`, `Technical message: ${message}`, ...(suppliedDetails ? ["Tool output:", suppliedDetails] : []), ...(frames.length ? ["Stack frames:", ...frames] : [])].join("\n").slice(0, 4000);
+  return { code, message, details };
+}
 export const publicUser = (u: DbUser): User => ({
   id: u.id,
   username: u.username,
@@ -137,6 +185,8 @@ export async function buildApp(store: Store, config: Config) {
       return reply
         .status(error.statusCode)
         .send({ error: { code: error.code } });
+    if (error instanceof DatabaseBackupError && ["BACKUP_BUSY", "INVALID_BACKUP_FILE"].includes(error.code))
+      return reply.status(error.code === "BACKUP_BUSY" ? 409 : 400).send({ error: { code: error.code } });
     const accessError = databaseAccessError(error);
     if (accessError)
       return reply
@@ -166,22 +216,21 @@ export async function buildApp(store: Store, config: Config) {
     } catch {
       // Logging must never hide the original failure.
     }
-    const rawCode = (error as { code?: unknown }).code;
-    const rawName = (error as { name?: unknown }).name;
-    const code = (typeof rawCode === "string" ? rawCode : typeof rawName === "string" ? rawName : "REQUEST_FAILED")
-      .replace(/[^a-zA-Z0-9_.-]/g, "_")
-      .slice(0, 80);
+    const technical = technicalError(error);
     await store.recordSystemLog?.({
       level: "error",
       source: "api",
-      code,
-      message: "Unexpected server error",
+      code: technical.code,
+      message: technical.message,
+      details: technical.details,
+      requestId: String(req.id).slice(0, 100),
       method: req.method.slice(0, 10),
       path: req.url.split("?")[0].slice(0, 300),
       userId,
     }).catch(() => undefined);
-    // Do not log raw exception messages: they may contain credentials or patient data.
-    app.log.error({ code: "REQUEST_FAILED" }, "Request failed");
+    app.log.error({ code: technical.code, requestId: req.id }, "Request failed");
+    if (error instanceof DatabaseBackupError)
+      return reply.status(503).send({ error: { code: error.code } });
     return reply.status(503).send({ error: { code: "SERVICE_UNAVAILABLE" } });
   });
   async function authenticated(req: FastifyRequest) {
@@ -204,8 +253,7 @@ export async function buildApp(store: Store, config: Config) {
     };
   }
   async function scoped(req: FastifyRequest, screen: Screen, action: Action) {
-    const user = await userWithAccess(await authenticated(req));
-    if (!allowed(user, screen, action)) throw new ApiError("FORBIDDEN", 403);
+    const user = await authorized(req, screen, action);
     const raw = req.headers["x-clinic-room"];
     const roomId =
       typeof raw === "string" && /^\d+$/.test(raw)
@@ -219,6 +267,11 @@ export async function buildApp(store: Store, config: Config) {
       throw new ApiError("FORBIDDEN", 403);
     return roomId;
   }
+  async function authorized(req: FastifyRequest, screen: Screen, action: Action) {
+    const user = await userWithAccess(await authenticated(req));
+    if (!allowed(user, screen, action)) throw new ApiError("FORBIDDEN", 403);
+    return user;
+  }
   async function administrator(req: FastifyRequest) {
     const user = await authenticated(req);
     requireRole(user, ["ADMIN"]);
@@ -228,6 +281,16 @@ export async function buildApp(store: Store, config: Config) {
     await administrator(req);
     const input = systemLogQuerySchema.parse(req.query);
     return store.listSystemLogs?.(input) ?? { logs: [], total: 0 };
+  });
+  app.delete<{ Params: { id: string } }>("/api/admin/system-logs/:id", async (req, reply) => {
+    await administrator(req);
+    if (!(await store.deleteSystemLog?.(systemLogIdSchema.parse(req.params.id)))) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
+  });
+  app.delete("/api/admin/system-logs", async (req) => {
+    await administrator(req);
+    const { source } = systemLogClearSchema.parse(req.query);
+    return { deleted: await store.clearSystemLogs?.(source) ?? 0 };
   });
   app.post(
     "/api/system-logs/client",
@@ -240,6 +303,8 @@ export async function buildApp(store: Store, config: Config) {
         source: "client",
         code: input.code,
         message: input.message,
+        details: sanitizeTechnicalText(input.details, 4000),
+        requestId: String(req.id).slice(0, 100),
         method: "CLIENT",
         path: input.path,
         userId: user.id,
@@ -393,16 +458,226 @@ export async function buildApp(store: Store, config: Config) {
   }));
   app.get("/api/dashboard", async (req) => {
     const roomId = await scoped(req, "dashboard", "view");
-    const period = dashboardPeriodSchema.parse((req.query as { period?: string }).period ?? "monthly");
-    return store.getDashboard(roomId, period);
+    return store.getDashboard(roomId, dashboardQuerySchema.parse(req.query));
   });
   app.get("/api/reports/new-patients", async (req) => {
-    const roomId = await scoped(req, "reportsListing", "view");
+    const roomId = await scoped(req, "reportNewPatients", "view");
     return store.getNewPatientsReport(newPatientReportQuerySchema.parse(req.query), roomId);
+  });
+  app.get("/api/reports/lab-statement", async (req) => {
+    const roomId = await scoped(req, "reportLabStatement", "view");
+    return store.getLabStatement(labStatementQuerySchema.parse(req.query), roomId);
+  });
+  app.get("/api/reports/patients-statement", async (req) => {
+    const roomId = await scoped(req, "reportPatientsStatement", "view");
+    return store.getPatientStatement(patientStatementQuerySchema.parse(req.query), roomId);
+  });
+  app.get("/api/reports/billing-payments", async (req) => {
+    const roomId = await scoped(req, "reportBillingPayments", "view");
+    return store.getBillingAnalytics(billingAnalyticsQuerySchema.parse(req.query), roomId);
+  });
+  app.get("/api/reports/inventory", async (req) => {
+    const roomId = await scoped(req, "reportInventoryAnalytics", "view");
+    return store.getInventoryAnalytics(inventoryAnalyticsQuerySchema.parse(req.query), roomId);
   });
   app.get("/api/procedures", async (req) => {
     const roomId = await scoped(req, "actsProcedures", "view");
     return store.searchProcedures(procedureSearchSchema.parse(req.query), roomId);
+  });
+  app.get("/api/bill-categories", async (req) => {
+    const roomId = await scoped(req, "billsCategories", "view");
+    return store.searchBillCategories(billCategorySearchSchema.parse(req.query), roomId);
+  });
+  app.get("/api/supplies", async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "view");
+    return store.searchSupplyItems(supplyItemSearchSchema.parse(req.query), roomId);
+  });
+  app.get("/api/purchase-invoices", async (req) => {
+    const roomId = await scoped(req, "purchaseInvoice", "view");
+    return store.searchPurchaseInvoices(purchaseInvoiceSearchSchema.parse(req.query), roomId);
+  });
+  app.get("/api/purchase-invoices/suppliers", async (req) => {
+    const roomId = await scoped(req, "purchaseInvoice", "view"); const { q } = inventoryOptionSearchSchema.parse(req.query);
+    return store.searchSupplierOptions(q, roomId);
+  });
+  app.get("/api/purchase-invoices/products", async (req) => {
+    const roomId = await scoped(req, "purchaseInvoice", "view");
+    const query = req.query as { supplierId?: unknown; date?: unknown };
+    const supplierId = patientIdSchema.parse(query.supplierId);
+    const date = rateDateSchema.parse(query.date);
+    return store.purchaseProducts(supplierId, roomId, date);
+  });
+  app.get<{ Params: { id: string } }>("/api/purchase-invoices/:id", async (req) => {
+    const roomId = await scoped(req, "purchaseInvoice", "view"); const invoice = await store.findPurchaseInvoice(patientIdSchema.parse(req.params.id), roomId);
+    if (!invoice) throw new ApiError("NOT_FOUND", 404); return { invoice };
+  });
+  app.post("/api/purchase-invoices", { bodyLimit: 65536 }, async (req, reply) => {
+    const roomId = await scoped(req, "purchaseInvoice", "create"); const actorId = (await authenticated(req)).id;
+    return reply.status(201).send({ invoice: await store.createPurchaseInvoice(purchaseInvoiceSchema.parse(req.body), roomId, actorId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/purchase-invoices/:id", { bodyLimit: 65536 }, async (req) => {
+    const roomId = await scoped(req, "purchaseInvoice", "modify"); const invoice = await store.updatePurchaseInvoice(patientIdSchema.parse(req.params.id), purchaseInvoiceSchema.parse(req.body), roomId);
+    if (!invoice) throw new ApiError("NOT_FOUND", 404); return { invoice };
+  });
+  app.delete<{ Params: { id: string } }>("/api/purchase-invoices/:id", async (req, reply) => {
+    const roomId = await scoped(req, "purchaseInvoice", "delete");
+    if (!(await store.deletePurchaseInvoice(patientIdSchema.parse(req.params.id), roomId))) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
+  });
+  app.get("/api/suppliers", async (req) => {
+    const roomId = await scoped(req, "suppliersVendors", "view");
+    return store.searchSuppliers(supplierSearchSchema.parse(req.query), roomId);
+  });
+  app.get<{ Params: { id: string } }>("/api/suppliers/:id", async (req) => {
+    const roomId = await scoped(req, "suppliersVendors", "view");
+    const supplier = await store.findSupplier(patientIdSchema.parse(req.params.id), roomId);
+    if (!supplier) throw new ApiError("NOT_FOUND", 404); return { supplier };
+  });
+  app.post("/api/suppliers", { bodyLimit: 16384 }, async (req, reply) => {
+    const roomId = await scoped(req, "suppliersVendors", "create");
+    return reply.status(201).send({ supplier: await store.createSupplier(supplierSchema.parse(req.body), roomId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/suppliers/:id", { bodyLimit: 16384 }, async (req) => {
+    const roomId = await scoped(req, "suppliersVendors", "modify");
+    const supplier = await store.updateSupplier(patientIdSchema.parse(req.params.id), supplierSchema.parse(req.body), roomId);
+    if (!supplier) throw new ApiError("NOT_FOUND", 404); return { supplier };
+  });
+  app.patch<{ Params: { id: string } }>("/api/suppliers/:id/status", async (req) => {
+    const roomId = await scoped(req, "suppliersVendors", "modify");
+    const { active } = supplierStatusSchema.parse(req.body);
+    const supplier = await store.setSupplierActive(patientIdSchema.parse(req.params.id), active, roomId);
+    if (!supplier) throw new ApiError("NOT_FOUND", 404); return { supplier };
+  });
+  app.get("/api/supplies/brands", async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "view");
+    const { q } = inventoryOptionSearchSchema.parse(req.query);
+    return store.searchBrandOptions(q, roomId);
+  });
+  app.get("/api/supplies/suppliers", async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "view");
+    const { q } = inventoryOptionSearchSchema.parse(req.query);
+    return store.searchSupplierOptions(q, roomId);
+  });
+  app.get<{ Params: { id: string } }>("/api/supplies/:id", async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "view");
+    const item = await store.findSupplyItem(patientIdSchema.parse(req.params.id), roomId);
+    if (!item) throw new ApiError("NOT_FOUND", 404); return { item };
+  });
+  app.post("/api/supplies", { bodyLimit: 16384 }, async (req, reply) => {
+    const roomId = await scoped(req, "suppliesMaterials", "create");
+    return reply.status(201).send({ item: await store.createSupplyItem(supplyItemSchema.parse(req.body), roomId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/supplies/:id", { bodyLimit: 16384 }, async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "modify");
+    const item = await store.updateSupplyItem(patientIdSchema.parse(req.params.id), supplyItemSchema.parse(req.body), roomId);
+    if (!item) throw new ApiError("NOT_FOUND", 404); return { item };
+  });
+  app.delete<{ Params: { id: string } }>("/api/supplies/:id", async (req, reply) => {
+    const roomId = await scoped(req, "suppliesMaterials", "delete");
+    if (!(await store.deleteSupplyItem(patientIdSchema.parse(req.params.id), roomId))) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
+  });
+  app.get("/api/bill-expenses", async (req) => {
+    const roomId = await scoped(req, "billsPayments", "view");
+    return store.searchBillExpenses(billExpenseSearchSchema.parse(req.query), roomId);
+  });
+  app.get<{ Params: { id: string } }>("/api/bill-expenses/:id", async (req) => {
+    const roomId = await scoped(req, "billsPayments", "view");
+    const expense = await store.findBillExpense(req.params.id, roomId);
+    if (!expense) throw new ApiError("NOT_FOUND", 404); return { expense };
+  });
+  app.post("/api/bill-expenses", { bodyLimit: 16384 }, async (req, reply) => {
+    const roomId = await scoped(req, "billsPayments", "create");
+    const actorId = (await authenticated(req)).id;
+    return reply.status(201).send({ expense: await store.createBillExpense(billExpenseSchema.parse(req.body), roomId, actorId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/bill-expenses/:id", { bodyLimit: 16384 }, async (req) => {
+    const roomId = await scoped(req, "billsPayments", "modify");
+    const expense = await store.updateBillExpense(req.params.id, billExpenseSchema.parse(req.body), roomId);
+    if (!expense) throw new ApiError("NOT_FOUND", 404); return { expense };
+  });
+  app.delete<{ Params: { id: string } }>("/api/bill-expenses/:id", async (req, reply) => {
+    const roomId = await scoped(req, "billsPayments", "delete");
+    if (!(await store.deleteBillExpense(req.params.id, roomId))) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
+  });
+  app.get<{ Params: { id: string } }>("/api/bill-categories/:id", async (req) => {
+    const roomId = await scoped(req, "billsCategories", "view");
+    const category = await store.findBillCategory(patientIdSchema.parse(req.params.id), roomId);
+    if (!category) throw new ApiError("NOT_FOUND", 404);
+    return { category };
+  });
+  app.post("/api/bill-categories", { bodyLimit: 16384 }, async (req, reply) => {
+    const roomId = await scoped(req, "billsCategories", "create");
+    return reply.status(201).send({ category: await store.createBillCategory(billCategorySchema.parse(req.body), roomId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/bill-categories/:id", { bodyLimit: 16384 }, async (req) => {
+    const roomId = await scoped(req, "billsCategories", "modify");
+    const category = await store.updateBillCategory(patientIdSchema.parse(req.params.id), billCategorySchema.parse(req.body), roomId);
+    if (!category) throw new ApiError("NOT_FOUND", 404);
+    return { category };
+  });
+  app.patch<{ Params: { id: string } }>("/api/bill-categories/:id/status", async (req) => {
+    const roomId = await scoped(req, "billsCategories", "modify");
+    const { active } = billCategoryStatusSchema.parse(req.body);
+    const category = await store.setBillCategoryActive(patientIdSchema.parse(req.params.id), active, roomId);
+    if (!category) throw new ApiError("NOT_FOUND", 404);
+    return { category };
+  });
+  app.get("/api/laboratories", async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "view");
+    return store.searchLaboratories(laboratoryCatalogSearchSchema.parse(req.query), roomId);
+  });
+  app.get<{ Params: { id: string } }>("/api/laboratories/:id", async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "view");
+    const laboratory = await store.findLaboratory(patientIdSchema.parse(req.params.id), roomId);
+    if (!laboratory) throw new ApiError("NOT_FOUND", 404);
+    return { laboratory };
+  });
+  app.post("/api/laboratories", { bodyLimit: 32768 }, async (req, reply) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "create");
+    return reply.status(201).send({ laboratory: await store.createLaboratory(laboratoryCatalogSchema.parse(req.body), roomId) });
+  });
+  app.put<{ Params: { id: string } }>("/api/laboratories/:id", { bodyLimit: 32768 }, async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "modify");
+    const laboratory = await store.updateLaboratory(patientIdSchema.parse(req.params.id), laboratoryCatalogSchema.parse(req.body), roomId);
+    if (!laboratory) throw new ApiError("NOT_FOUND", 404);
+    return { laboratory };
+  });
+  app.patch<{ Params: { id: string } }>("/api/laboratories/:id/status", async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "modify");
+    const { active } = laboratoryCatalogStatusSchema.parse(req.body);
+    const laboratory = await store.setLaboratoryActive(patientIdSchema.parse(req.params.id), active, roomId);
+    if (!laboratory) throw new ApiError("NOT_FOUND", 404);
+    return { laboratory };
+  });
+  app.get<{ Params: { id: string } }>("/api/laboratories/:id/rates", async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "view");
+    return { rates: await store.listLaboratoryRates(patientIdSchema.parse(req.params.id), roomId) };
+  });
+  app.post<{ Params: { id: string } }>("/api/laboratories/:id/rates", { bodyLimit: 32768 }, async (req, reply) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "create");
+    const rate = await store.createLaboratoryRate(patientIdSchema.parse(req.params.id), laboratoryRateSchema.parse(req.body), roomId);
+    return reply.status(201).send({ rate });
+  });
+  app.put<{ Params: { id: string; rateId: string } }>("/api/laboratories/:id/rates/:rateId", { bodyLimit: 32768 }, async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "modify");
+    const rate = await store.updateLaboratoryRate(patientIdSchema.parse(req.params.id), patientIdSchema.parse(req.params.rateId), laboratoryRateSchema.parse(req.body), roomId);
+    if (!rate) throw new ApiError("NOT_FOUND", 404);
+    return { rate };
+  });
+  app.patch<{ Params: { id: string; rateId: string } }>("/api/laboratories/:id/rates/:rateId/status", async (req) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "modify");
+    const { active } = laboratoryCatalogStatusSchema.parse(req.body);
+    const rate = await store.setLaboratoryRateActive(patientIdSchema.parse(req.params.id), patientIdSchema.parse(req.params.rateId), active, roomId);
+    if (!rate) throw new ApiError("NOT_FOUND", 404);
+    return { rate };
+  });
+  app.delete<{ Params: { id: string; rateId: string } }>("/api/laboratories/:id/rates/:rateId", async (req, reply) => {
+    const roomId = await scoped(req, "laboratoriesCatalog", "delete");
+    const deleted = await store.deleteLaboratoryRate(patientIdSchema.parse(req.params.id), patientIdSchema.parse(req.params.rateId), roomId);
+    if (!deleted) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
   });
   app.get<{ Params: { id: string } }>("/api/procedures/:id", async (req) => {
     const roomId = await scoped(req, "actsProcedures", "view");
@@ -481,7 +756,7 @@ export async function buildApp(store: Store, config: Config) {
     },
   );
   app.get("/currencies", async (req) => {
-    const roomId = await scoped(req, "settings", "view");
+    const roomId = await scoped(req, "currencySetup", "view");
     const today = clinicDate();
     const [baseCurrency, rates] = await Promise.all([
       store.getBaseCurrency(roomId),
@@ -510,22 +785,23 @@ export async function buildApp(store: Store, config: Config) {
     return { baseCurrency: await store.getBaseCurrency(roomId) };
   });
   app.patch("/currencies", async (req) => {
-    const roomId = await scoped(req, "settings", "modify");
+    const roomId = await scoped(req, "currencySetup", "modify");
     const { baseCurrency } = currencySettingsSchema.parse(req.body);
     await store.setBaseCurrency(baseCurrency, roomId);
     return { baseCurrency };
   });
   app.put("/currencies/rates", async (req) => {
-    const roomId = await scoped(req, "settings", "view");
+    const roomId = await scoped(req, "currencySetup", "view");
     const rate = exchangeRateSchema.parse(req.body);
     if (rate.date > clinicDate()) throw new ApiError("VALIDATION_ERROR", 400);
     const existing = (
       await store.listExchangeRates(rate.date.slice(0, 4), roomId)
     ).some((r) => r.date === rate.date);
-    await scoped(req, "settings", existing ? "modify" : "create");
+    await scoped(req, "currencySetup", existing ? "modify" : "create");
     await store.saveExchangeRate(rate, roomId, !existing);
     return { rate };
   });
+  registerDatabaseBackup(app, config, (request, action) => authorized(request, "backupRestore", action));
   const cleanup = setInterval(
     () => {
       void store
@@ -547,10 +823,11 @@ export async function buildApp(store: Store, config: Config) {
     app.setNotFoundHandler((req, reply) => {
       if (
         req.method === "GET" &&
-        (["/", "/login", "/dashboard", "/settings", "/settings/general", "/settings/currency", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/new-patients", "/treatment"].includes(
+        (["/", "/login", "/dashboard", "/settings", "/settings/general", "/settings/currency", "/settings/backup", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/lab-statement", "/reports/billing-payments", "/reports/inventory", "/treatment"].includes(
           req.url.split("?")[0],
         ) ||
-          /^\/(?:patients|procedures)(?:\/(?:new|\d+))?$/.test(req.url.split("?")[0]))
+          /^\/(?:patients|procedures)(?:\/(?:new|\d+))?$/.test(req.url.split("?")[0]) ||
+          /^\/admin\/users\/(?:new|[0-9a-f-]{36})$/.test(req.url.split("?")[0]))
       )
         return reply.sendFile("index.html");
       return reply.status(404).send({ error: { code: "NOT_FOUND" } });

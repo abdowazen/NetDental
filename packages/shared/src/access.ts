@@ -5,14 +5,22 @@ export const screens = [
   "patients",
   "treatment",
   "actsProcedures",
-  "reportsListing",
+  "laboratoriesCatalog",
+  "reportNewPatients",
+  "reportPatientsStatement",
+  "reportLabStatement",
+  "reportBillingPayments",
+  "reportInventoryAnalytics",
   "billsCategories",
+  "billsPayments",
   "payments",
-  "reportsAnalytics",
   "purchaseInvoice",
   "suppliesMaterials",
   "suppliersVendors",
   "settings",
+  "currencySetup",
+  "backupRestore",
+  "help",
 ] as const;
 export type Screen = (typeof screens)[number];
 export const actions = ["view", "create", "modify", "delete"] as const;
@@ -53,10 +61,36 @@ export function landingPath(user: { role: string; access?: Access } | null) {
         ? "/treatment"
       : allowed(user, "actsProcedures")
         ? "/procedures"
-      : allowed(user, "reportsListing")
+      : allowed(user, "laboratoriesCatalog")
+        ? "/laboratories"
+      : allowed(user, "reportNewPatients")
         ? "/reports/new-patients"
+      : allowed(user, "reportPatientsStatement")
+        ? "/reports/patients-statement"
+      : allowed(user, "reportLabStatement")
+        ? "/reports/lab-statement"
+      : allowed(user, "reportBillingPayments")
+        ? "/reports/billing-payments"
+      : allowed(user, "reportInventoryAnalytics")
+        ? "/reports/inventory"
+      : allowed(user, "billsPayments")
+        ? "/bills-payments"
+      : allowed(user, "billsCategories")
+        ? "/bill-categories"
+      : allowed(user, "suppliesMaterials")
+        ? "/supplies"
+      : allowed(user, "purchaseInvoice")
+        ? "/purchase-invoices"
+      : allowed(user, "suppliersVendors")
+        ? "/suppliers"
       : allowed(user, "settings")
         ? "/settings"
+      : allowed(user, "currencySetup")
+        ? "/settings/currency"
+      : allowed(user, "backupRestore")
+        ? "/settings/backup"
+      : allowed(user, "help")
+        ? "/settings/help"
         : "/dashboard";
 }
 const permissionSchema = z

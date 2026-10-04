@@ -14,6 +14,16 @@ function safeMessage(value: unknown) {
     .slice(0, 500) || "Unknown client runtime error";
 }
 
+function safeDetails(value: unknown) {
+  if (!(value instanceof Error)) return "";
+  const frames = value.stack?.split(/\r?\n/).slice(1).filter((line) => /^\s*at\s/.test(line)).slice(0, 8) ?? [];
+  return [`Error name: ${value.name}`, `Technical message: ${value.message}`, ...(frames.length ? ["Stack frames:", ...frames] : [])]
+    .join("\n")
+    .replace(/(?:postgres(?:ql)?:\/\/|https?:\/\/)[^\s)]+/gi, "[redacted-url]")
+    .replace(/(authorization|cookie|password|token|secret)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .slice(0, 4000);
+}
+
 export function ClientErrorReporter() {
   const { user } = useAuth();
   const recent = useRef({ signature: "", at: 0 });
@@ -22,13 +32,14 @@ export function ClientErrorReporter() {
     if (!user) return;
     const report = (value: unknown) => {
       const message = safeMessage(value);
+      const details = safeDetails(value);
       const code = value instanceof Error ? value.name.slice(0, 80) : "CLIENT_RUNTIME_ERROR";
       const signature = `${code}:${message}:${window.location.pathname}`;
       if (recent.current.signature === signature && Date.now() - recent.current.at < 10_000) return;
       recent.current = { signature, at: Date.now() };
       void api("/api/system-logs/client", {
         method: "POST",
-        body: JSON.stringify({ code, message, path: window.location.pathname.slice(0, 300) }),
+        body: JSON.stringify({ code, message, details, path: window.location.pathname.slice(0, 300) }),
       }).catch(() => undefined);
     };
     const onError = (event: ErrorEvent) => report(event.error ?? event.message);

@@ -11,12 +11,15 @@ export interface OdontogramStore {
   createPlan(patientId: number, roomId: number, actorId: string, expectedPlanId: string | null): Promise<void>;
   editTreatment(patientId: number, roomId: number, actorId: string, id: string, input: TreatmentEditInput): Promise<void>;
   savePlanTotal(patientId: number, roomId: number, actorId: string, input: PlanTotalInput): Promise<void>;
+  saveUnplannedTotal(patientId: number, roomId: number, actorId: string, input: PlanTotalInput): Promise<void>;
   getChart(patientId: number, roomId: number): Promise<ChartData>;
   saveDentition(patientId: number, roomId: number, dentition: Dentition): Promise<void>;
   addClinicalRecord(patientId: number, roomId: number, actorId: string, kind: "tooth" | "finding", input: ToothEventInput | FindingInput): Promise<void>;
   voidClinicalRecord(patientId: number, roomId: number, actorId: string, id: string, input: VoidInput): Promise<void>;
-  addTreatment(patientId: number, roomId: number, actorId: string, input: TreatmentInput, standalone?: boolean): Promise<void>;
+  addTreatment(patientId: number, roomId: number, actorId: string, input: TreatmentInput,
+    workflow?: "planned" | "session" | "completed"): Promise<void>;
   changeTreatment(patientId: number, roomId: number, actorId: string, id: string, input: TreatmentStatusInput): Promise<void>;
+  deleteTreatment(patientId: number, roomId: number, id: string): Promise<void>;
   voidTreatment(patientId: number, roomId: number, actorId: string, id: string, input: VoidInput): Promise<void>;
 }
 export function odontogramStore(db: PrismaClient): OdontogramStore {
@@ -84,6 +87,8 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
         plan: plan ? { id: plan.id, number: plan.number, createdAt: plan.createdAt.toISOString() } : null,
         planDiscount: (() => { const row = clinical.filter((r) => r.kind === "plan_total" && r.planId === plan?.id).sort((a,b) => b.recordedAt.getTime() - a.recordedAt.getTime())[0];
           return row ? { id: row.id, discount: discountSchema.parse((row.data as { discount: unknown }).discount) } : null; })(),
+        unplannedDiscount: (() => { const row = clinical.filter((r) => r.kind === "unplan_total" && r.planId === null).sort((a,b) => b.recordedAt.getTime() - a.recordedAt.getTime())[0];
+          return row ? { id: row.id, discount: discountSchema.parse((row.data as { discount: unknown }).discount) } : null; })(),
         dentition: (config?.dentition as Dentition) ?? null,
         toothEvents: clinical.filter((r) => r.kind === "tooth").map((r) => ({ ...toothEventSchema.parse(r.data), ...audit(r) })) as ToothEvent[],
         findings: clinical.filter((r) => r.kind === "finding").map((r) => ({ ...findingSchema.parse(r.data), ...audit(r) })) as Finding[],
@@ -96,7 +101,7 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
     }),
     editTreatment: (patientId, roomId, actorId, id, input) => scoped(patientId, roomId, async (tx) => {
       const old = await locked(tx, patientId, id);
-      if (old.voidReason || old.status !== "planned" || old.version !== input.expectedVersion) throw new AccessError("CONFLICT");
+      if (old.voidReason || !["planned", "completed"].includes(old.status) || old.version !== input.expectedVersion) throw new AccessError("CONFLICT");
       if (input.discount.type === "amount" && moneyCents(input.discount.value) > moneyCents(old.price.toFixed(2))) throw new AccessError("VALIDATION_ERROR");
       await tx.treatment.update({ where: { id }, data: { discountType: input.discount.type, discountValue: input.discount.value, date: date(input.date), notes: input.notes,
         version: { increment: 1 }, events: { create: { status: "edited", date: date(input.date), actorId,
@@ -115,6 +120,19 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
         recordedAt: new Date(Math.max(Date.now(), (previous?.recordedAt.getTime() ?? 0) + 1)),
         data: { discount: input.discount, subtotalAtSave: moneyString(subtotal), previousId: previous?.id ?? null } } });
     }),
+    saveUnplannedTotal: (patientId, roomId, actorId, input) => scoped(patientId, roomId, async (tx) => {
+      if (input.planId !== null) throw new AccessError("VALIDATION_ERROR");
+      await tx.$queryRaw`SELECT "id" FROM "Patient" WHERE "id" = ${patientId} FOR UPDATE`;
+      const previous = await tx.clinicalRecord.findFirst({ where: { patientId, planId: null, kind: "unplan_total" }, orderBy: { recordedAt: "desc" } });
+      if ((previous?.id ?? null) !== input.expectedId) throw new AccessError("CONFLICT");
+      const rows = await tx.treatment.findMany({ where: { patientId, planId: null, voidReason: null, status: { not: "cancelled" } } });
+      const subtotal = rows.reduce((sum, row) => sum + treatmentNet({ price: row.price.toFixed(2),
+        discount: discountSchema.parse({ type: row.discountType, value: row.discountValue.toFixed(2) }) }), 0n);
+      if (input.discount.type === "amount" && moneyCents(input.discount.value) > subtotal) throw new AccessError("VALIDATION_ERROR");
+      await tx.clinicalRecord.create({ data: { patientId, planId: null, actorId, kind: "unplan_total", date: new Date(),
+        recordedAt: new Date(Math.max(Date.now(), (previous?.recordedAt.getTime() ?? 0) + 1)),
+        data: { discount: input.discount, subtotalAtSave: moneyString(subtotal), previousId: previous?.id ?? null } } });
+    }),
     saveDentition: (patientId, roomId, dentition) => scoped(patientId, roomId, async (tx) => {
       await tx.patientChart.upsert({ where: { patientId }, create: { patientId, dentition }, update: { dentition } });
     }),
@@ -126,18 +144,31 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
         data: { voidReason: input.reason, voidDate: date(input.date), voidActorId: actorId } });
       if (!count.count) throw new AccessError("CONFLICT");
     }),
-    addTreatment: (patientId, roomId, actorId, input, standalone = false) => scoped(patientId, roomId, async (tx) => {
-      const plan = standalone ? null : await planForWrite(tx, patientId, actorId, input.planId);
+    addTreatment: (patientId, roomId, actorId, input, workflow = "planned") => scoped(patientId, roomId, async (tx) => {
+      const plan = workflow === "planned" ? await planForWrite(tx, patientId, actorId, input.planId) : null;
+      const initialStatus = workflow === "planned" ? "planned" : workflow === "completed" ? "completed" : "in_progress";
       const procedure = await tx.procedure.findFirst({ where: { id: input.procedureId, roomId, active: true } });
       if (!procedure) throw new AccessError("NOT_FOUND");
+      const laboratoryRate = input.laboratoryId
+        ? await tx.laboratoryProcedureRate.findFirst({
+            where: { laboratoryId: input.laboratoryId, procedureId: procedure.id, active: true, laboratory: { roomId, active: true } },
+            include: { laboratory: true },
+          })
+        : null;
+      if (procedure.requiresLab && !laboratoryRate)
+        throw new AccessError("VALIDATION_ERROR");
+      const laboratory = laboratoryRate?.laboratory;
       const { teeth, mode } = input;
       if (teeth.some((t) => procedure.dentition !== "both" && (toothInfo(t.tooth).primary ? "primary" : "permanent") !== procedure.dentition))
         throw new AccessError("VALIDATION_ERROR");
-      if (procedure.scope === "whole_mouth" ? teeth.length > 0 || mode !== "group" : !teeth.length)
+      const toothSelectionOptional = ["multiple_teeth", "whole_mouth"].includes(procedure.scope);
+      if (!toothSelectionOptional && !teeth.length)
+        throw new AccessError("VALIDATION_ERROR");
+      if (procedure.scope === "whole_mouth" && (teeth.length > 0 || mode !== "group"))
         throw new AccessError("VALIDATION_ERROR");
       if (["single_tooth", "tooth_surfaces"].includes(procedure.scope) && mode === "group" && teeth.length !== 1)
         throw new AccessError("VALIDATION_ERROR");
-      if (procedure.scope === "multiple_teeth" && (mode !== "group" || teeth.length < 2))
+      if (procedure.scope === "multiple_teeth" && (mode !== "group" || teeth.length === 1))
         throw new AccessError("VALIDATION_ERROR");
       if (procedure.scope === "tooth_surfaces" && teeth.some((t) => !t.surfaces.length))
         throw new AccessError("VALIDATION_ERROR");
@@ -148,24 +179,26 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
       const groups = mode === "independent" ? teeth.map((tooth) => [tooth]) : [teeth];
       for (const group of groups) {
         const treatment = await tx.treatment.create({ data: {
-          patientId, planId: plan?.id ?? null, status: standalone ? "in_progress" : "planned", procedureId: procedure.id,
+          patientId, planId: plan?.id ?? null, status: initialStatus, procedureId: procedure.id, laboratoryId: laboratory?.id,
           snapshot: { code: procedure.code, name: procedure.name, category: procedure.category, scope: procedure.scope, dentition: procedure.dentition,
-            requiresLab: procedure.requiresLab, labLaboratory: procedure.labLaboratory, labDefaultCost: procedure.labDefaultCost.toFixed(2), labTurnaroundDays: procedure.labTurnaroundDays,
-            labMaterial: procedure.labMaterial, labShade: procedure.labShade, labInstructions: procedure.labInstructions,
+            requiresLab: procedure.requiresLab, laboratoryId: laboratory?.id, laboratoryRateId: laboratoryRate?.id,
+            labLaboratory: laboratory?.name ?? "", labDefaultCost: laboratoryRate?.cost.toFixed(2) ?? "0.00",
+            labCostCurrency: laboratoryRate?.currency ?? "USD", labTurnaroundDays: laboratoryRate?.turnaroundDays ?? 0,
+            labMaterial: input.labMaterial ?? laboratory?.material ?? "", labShade: input.labShade ?? laboratory?.shade ?? "", labInstructions: input.labInstructions ?? laboratory?.instructions ?? "",
             chartIndicator: procedure.chartIndicator, defaultPrice: procedure.defaultPrice.toFixed(2), mode },
-          price: standalone ? procedure.defaultPrice : input.price, date: date(input.date), notes: input.notes, replacesId: input.replacesId,
+          price: procedure.defaultPrice, date: date(input.date), notes: input.notes, replacesId: input.replacesId,
           teeth: { create: group },
-          events: { create: { status: standalone ? "in_progress" : "planned", date: date(input.date), notes: input.notes, actorId } },
+          events: { create: { status: initialStatus, date: date(input.date), notes: input.notes, actorId } },
         } });
         if (procedure.requiresLab) {
           const requestDate = date(input.date);
           const dueDate = new Date(requestDate);
-          dueDate.setUTCDate(dueDate.getUTCDate() + procedure.labTurnaroundDays);
+          dueDate.setUTCDate(dueDate.getUTCDate() + laboratoryRate!.turnaroundDays);
           await tx.labRequest.create({ data: {
             treatmentId: treatment.id, patientId, roomId, createdById: actorId,
-            laboratory: procedure.labLaboratory, cost: procedure.labDefaultCost,
-            material: procedure.labMaterial, shade: procedure.labShade,
-            instructions: procedure.labInstructions, requestDate, dueDate,
+            laboratory: laboratory!.name, cost: laboratoryRate!.cost, currency: laboratoryRate!.currency,
+            material: input.labMaterial ?? laboratory!.material, shade: input.labShade ?? laboratory!.shade,
+            instructions: input.labInstructions ?? laboratory!.instructions, requestDate, dueDate,
             events: { create: { action: "to_request", date: requestDate, actorId } },
           } });
         }
@@ -180,6 +213,18 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
         throw new AccessError("CONFLICT");
       await tx.treatment.update({ where: { id }, data: { status: input.status, version: { increment: 1 },
         events: { create: { status: input.status, date: date(input.date), notes: input.notes, actorId } } } });
+    }),
+    deleteTreatment: (patientId, roomId, id) => scoped(patientId, roomId, async (tx) => {
+      await locked(tx, patientId, id);
+      if (await tx.treatment.count({ where: { replacesId: id } })) throw new AccessError("CONFLICT");
+      const lab = await tx.labRequest.findUnique({ where: { treatmentId: id }, select: { id: true } });
+      if (lab) {
+        await tx.labRequestEvent.deleteMany({ where: { requestId: lab.id } });
+        await tx.labRequest.delete({ where: { id: lab.id } });
+      }
+      await tx.treatmentEvent.deleteMany({ where: { treatmentId: id } });
+      await tx.treatmentTooth.deleteMany({ where: { treatmentId: id } });
+      await tx.treatment.delete({ where: { id } });
     }),
     voidTreatment: (patientId, roomId, actorId, id, input) => scoped(patientId, roomId, async (tx) => {
       const old = await locked(tx, patientId, id);

@@ -37,14 +37,15 @@ export async function checkPayments(
   assert.equal(response.statusCode, 200, response.body);
   const summary = response.json();
   assert.equal(summary.baseCurrency, "USD");
-  assert.equal(summary.planEstimate, "100.00");
-  assert.equal(summary.patientCharge, "100.00");
+  assert.equal(summary.planEstimate, "135.00");
+  assert.equal(summary.patientCharge, "135.00");
   assert.equal(summary.paymentReceived, "10.00");
-  assert.equal(summary.patientBalance, "90.00");
+  assert.equal(summary.patientBalance, "125.00");
   assert.equal(summary.payments[0].amount, "900000.00");
   assert.equal(summary.payments[0].baseAmount, "10.00");
   assert.equal(summary.payments[0].lbpPerUsd, "90000");
   assert.ok(summary.ledger.some((entry: { type: string; description: string }) => entry.type === "payment" && entry.description === "Deposit"));
+  assert.ok(summary.ledger.some((entry: { type: string; description: string }) => entry.type === "charge" && entry.description === "Unplanned treatment"));
 
   const stored = await db.payment.findFirstOrThrow({ where: { patientId } });
   assert.equal(stored.baseAmount.toFixed(2), "10.00");
@@ -53,10 +54,10 @@ export async function checkPayments(
   assert.equal((await app.inject({ method: "PATCH", url: "/currencies", headers, payload: { baseCurrency: "LBP" } })).statusCode, 200);
   const lbpSummary = (await app.inject({ url, headers })).json();
   assert.equal(lbpSummary.baseCurrency, "LBP");
-  assert.equal(lbpSummary.planEstimate, "9000000.00");
-  assert.equal(lbpSummary.patientCharge, "9000000.00");
+  assert.equal(lbpSummary.planEstimate, "12150000.00");
+  assert.equal(lbpSummary.patientCharge, "12150000.00");
   assert.equal(lbpSummary.paymentReceived, "900000.00");
-  assert.equal(lbpSummary.patientBalance, "8100000.00");
+  assert.equal(lbpSummary.patientBalance, "11250000.00");
   assert.equal(lbpSummary.payments[0].baseCurrency, "LBP");
   assert.equal(lbpSummary.payments[0].baseAmount, "900000.00");
   assert.ok(lbpSummary.ledger.some((entry: { type: string; baseAmount: string; baseCurrency: string }) => entry.type === "payment" && entry.baseAmount === "900000.00" && entry.baseCurrency === "LBP"));
@@ -67,13 +68,13 @@ export async function checkPayments(
   assert.equal((await app.inject({ method: "POST", url, headers, payload: { amount: "5", method: "card", date: "2026-01-02", currency: "USD", note: "USD after base change" } })).statusCode, 201);
   const mixedLbpSummary = (await app.inject({ url, headers })).json();
   assert.equal(mixedLbpSummary.paymentReceived, "1350000.00");
-  assert.equal(mixedLbpSummary.patientBalance, "7650000.00");
+  assert.equal(mixedLbpSummary.patientBalance, "10800000.00");
 
   assert.equal((await app.inject({ method: "PATCH", url: "/currencies", headers, payload: { baseCurrency: "USD" } })).statusCode, 200);
   const restoredUsdSummary = (await app.inject({ url, headers })).json();
   assert.equal(restoredUsdSummary.baseCurrency, "USD");
   assert.equal(restoredUsdSummary.paymentReceived, "15.00");
-  assert.equal(restoredUsdSummary.patientBalance, "85.00");
+  assert.equal(restoredUsdSummary.patientBalance, "120.00");
   assert.ok(restoredUsdSummary.payments.every((payment: { baseCurrency: string }) => payment.baseCurrency === "USD"));
   await db.payment.deleteMany({ where: { patientId, note: "USD after base change" } });
   assert.equal((await app.inject({ url, headers: { ...headers, "x-clinic-room": String(otherRoom) } })).statusCode, 404);

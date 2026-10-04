@@ -51,6 +51,10 @@ export const findingSchema = z.object({
 export const treatmentSchema = z.object({
   planId: z.string().uuid().nullable().default(null),
   procedureId: z.number().int().positive(),
+  laboratoryId: z.number().int().positive().optional(),
+  labMaterial: z.string().trim().max(100, "fieldTooLong").optional(),
+  labShade: z.string().trim().max(40, "fieldTooLong").optional(),
+  labInstructions: z.string().trim().max(2000, "fieldTooLong").optional(),
   mode: z.enum(["independent", "group"]),
   teeth: associations,
   date: rateDateSchema, notes,
@@ -126,6 +130,7 @@ export type ChartData = {
   plans?: { id: string; number: number; createdAt: string }[];
   plan?: { id: string; number: number; createdAt: string } | null;
   planDiscount?: { id: string; discount: Discount } | null;
+  unplannedDiscount?: { id: string; discount: Discount } | null;
   dentition: Dentition | null; toothEvents: ToothEvent[]; findings: Finding[]; treatments: Treatment[];
 };
 export function latestToothStates(events: ToothEvent[]) {

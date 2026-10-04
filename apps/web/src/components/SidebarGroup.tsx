@@ -3,6 +3,7 @@ import { useAuth } from "../features/auth/AuthProvider";
 import { useId, useState } from "react";
 import { ChevronDown, ChevronRight, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { NavLink, useLocation } from "react-router-dom";
 
 export function SidebarGroup({
   label,
@@ -13,12 +14,13 @@ export function SidebarGroup({
 }: {
   label: string;
   icon: LucideIcon;
-  items: { label: string; icon: LucideIcon }[];
+  items: { label: string; icon: LucideIcon; to?: string }[];
   collapsed: boolean;
   expandSidebar: () => void;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const { pathname } = useLocation();
+  const [expanded, setExpanded] = useState(items.some((item) => item.to && pathname.startsWith(item.to)));
   const id = useId();
   const { user } = useAuth();
   const visibleItems = items.filter((item) =>
@@ -29,7 +31,7 @@ export function SidebarGroup({
     <div>
       <button
         type="button"
-        className="nav-item w-full text-left"
+        className={`nav-item w-full text-left ${items.some((item) => item.to && pathname.startsWith(item.to)) ? "active" : ""}`}
         aria-label={t(label)}
         title={collapsed ? t(label) : undefined}
         aria-expanded={!collapsed && expanded}
@@ -66,9 +68,12 @@ export function SidebarGroup({
         hidden={collapsed || !expanded}
         className="ml-5 mt-1 border-l border-white/30 pl-3"
       >
-        {visibleItems.map(({ label: item, icon: ItemIcon }) => (
+        {visibleItems.map(({ label: item, icon: ItemIcon, to }) => (
           <li key={item}>
-            <button
+            {to ? <NavLink to={to} className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}>
+              <ItemIcon size={18} className="shrink-0" aria-hidden="true" />
+              <span>{t(item)}</span>
+            </NavLink> : <button
               type="button"
               disabled
               className="nav-item w-full text-left opacity-50"
@@ -82,7 +87,7 @@ export function SidebarGroup({
                   {t("comingSoon")}
                 </span>
               </span>
-            </button>
+            </button>}
           </li>
         ))}
       </ul>

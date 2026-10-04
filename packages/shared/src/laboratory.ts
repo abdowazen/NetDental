@@ -7,6 +7,7 @@ export const labDraftSchema = z.object({ treatmentId: z.string().uuid(), date: r
 export const labDetailsSchema = z.object({
   laboratory: z.string().trim().max(150),
   cost: procedureSchema.shape.defaultPrice,
+  currency: z.enum(["USD", "LBP"]),
   material: z.string().trim().max(100),
   shade: z.string().trim().max(40),
   instructions: z.string().trim().max(2000),

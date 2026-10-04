@@ -114,7 +114,7 @@ export function CurrencySettings() {
               className="input"
               value={data.baseCurrency}
               disabled={
-                baseMutation.isPending || !allowed(user, "settings", "modify")
+                baseMutation.isPending || !allowed(user, "currencySetup", "modify")
               }
               onChange={(event) =>
                 baseMutation.mutate(event.target.value as Currency)
@@ -174,7 +174,7 @@ export function CurrencySettings() {
                   value={date}
                   disabled={
                     rateMutation.isPending ||
-                    !allowed(user, "settings", existing ? "modify" : "create")
+                    !allowed(user, "currencySetup", existing ? "modify" : "create")
                   }
                   onChange={(event) => {
                     setDate(event.target.value);

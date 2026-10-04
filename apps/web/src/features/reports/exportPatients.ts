@@ -1,18 +1,20 @@
 import type { NewPatientReportRow } from "@clinic/shared";
 
-export type PatientExportColumn = {
+export type TableExportColumn<T> = {
   header: string;
-  value: (patient: NewPatientReportRow) => string;
+  value: (row: T) => string;
   width: number;
 };
 
-type PatientExportOptions = {
-  rows: NewPatientReportRow[];
-  columns: PatientExportColumn[];
+export type TableExportOptions<T> = {
+  rows: T[];
+  columns: TableExportColumn<T>[];
   title: string;
   period: string;
   filename: string;
 };
+export type PatientExportColumn = TableExportColumn<NewPatientReportRow>;
+type PatientExportOptions = TableExportOptions<NewPatientReportRow>;
 
 const encoder = new TextEncoder();
 
@@ -85,7 +87,7 @@ function cellName(column: number, row: number) {
   return `${label}${row}`;
 }
 
-export function exportPatientsExcel({ rows, columns, title, period, filename }: PatientExportOptions) {
+export function exportTableExcel<T>({ rows, columns, title, period, filename }: TableExportOptions<T>) {
   const values = [[title], [period], [], columns.map((column) => column.header), ...rows.map((patient) => columns.map((column) => column.value(patient)))];
   const sheetRows = values.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => `<c r="${cellName(columnIndex, rowIndex + 1)}" t="inlineStr"${rowIndex === 0 || rowIndex === 3 ? ' s="1"' : ""}><is><t xml:space="preserve">${xml(value)}</t></is></c>`).join("")}</row>`).join("");
   const columnWidths = columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${column.width}" customWidth="1"/>`).join("");
@@ -102,6 +104,8 @@ export function exportPatientsExcel({ rows, columns, title, period, filename }: 
   ]);
   download(archive, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `${filename}.xlsx`);
 }
+
+export function exportPatientsExcel(options: PatientExportOptions) { exportTableExcel(options); }
 
 function fitText(context: CanvasRenderingContext2D, value: string, width: number) {
   if (context.measureText(value).width <= width) return value;
@@ -143,9 +147,11 @@ function pdfFromJpegs(images: { bytes: Uint8Array; width: number; height: number
   return join(parts);
 }
 
-export function exportPatientsPdf({ rows, columns, title, period, filename }: PatientExportOptions) {
+export function exportTablePdf<T>({ rows, columns, title, period, filename }: TableExportOptions<T>) {
   const pageWidth = 1240, pageHeight = 1754, margin = 60, rowHeight = 46, rowsPerPage = 30;
-  const widths = [120, 250, 210, 105, 165, 270];
+  const requestedWidth = columns.reduce((total, column) => total + column.width, 0) || 1;
+  const printableWidth = pageWidth - margin * 2;
+  const widths = columns.map((column) => printableWidth * column.width / requestedWidth);
   const pages = Math.max(1, Math.ceil(rows.length / rowsPerPage));
   const images = Array.from({ length: pages }, (_, pageIndex) => {
     const canvas = document.createElement("canvas"); canvas.width = pageWidth; canvas.height = pageHeight;
@@ -170,3 +176,5 @@ export function exportPatientsPdf({ rows, columns, title, period, filename }: Pa
   });
   download(pdfFromJpegs(images), "application/pdf", `${filename}.pdf`);
 }
+
+export function exportPatientsPdf(options: PatientExportOptions) { exportTablePdf(options); }

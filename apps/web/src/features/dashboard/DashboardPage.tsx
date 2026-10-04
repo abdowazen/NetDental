@@ -7,7 +7,7 @@ import { api, errorKey } from "../../lib/api";
 import { ErrorMessage } from "../../components/ui";
 import { useWorkspace } from "../auth/WorkspaceProvider";
 
-export function DashboardPage() {
+export function ClinicalAnalyticsPage() {
   const { t, i18n } = useTranslation();
   const { roomId } = useWorkspace();
   const [period, setPeriod] = useState<DashboardPeriod>("monthly");

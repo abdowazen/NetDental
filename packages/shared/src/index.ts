@@ -4,6 +4,11 @@ import type { Access } from "./access.js";
 export * from "./currency.js";
 export * from "./payments.js";
 export * from "./laboratory.js";
+export * from "./laboratory-catalog.js";
+export * from "./bill-categories.js";
+export * from "./bill-expenses.js";
+export * from "./inventory.js";
+export * from "./purchase-invoices.js";
 export * from "./patient-files.js";
 export * from "./dashboard.js";
 export * from "./reports.js";
@@ -53,6 +58,11 @@ export type ErrorCode =
   | "VALIDATION_ERROR"
   | "RATE_LIMITED"
   | "SERVICE_UNAVAILABLE"
+  | "BACKUP_BUSY"
+  | "BACKUP_TOOL_UNAVAILABLE"
+  | "BACKUP_FAILED"
+  | "RESTORE_FAILED"
+  | "INVALID_BACKUP_FILE"
   | "INTERNAL_ERROR"
   | "NOT_FOUND";
 export type ApiErrorBody = { error: { code: ErrorCode } };

@@ -10,6 +10,12 @@ export const procedureDentitions = ["permanent", "primary", "both"] as const;
 export const procedureScopes = ["single_tooth", "tooth_surfaces", "multiple_teeth", "whole_mouth"] as const;
 // Expand this registry when additional odontogram renderers are implemented.
 export const chartIndicators = ["generic"] as const;
+export const labShades = [
+  "A1", "A2", "A3", "A3.5", "A4",
+  "B1", "B2", "B3", "B4",
+  "C1", "C2", "C3", "C4",
+  "BL1", "BL2", "BL3", "BL4",
+] as const;
 export const procedureSchema = z.object({
   code: z.string().trim().min(1, "fieldRequired").max(40, "fieldTooLong").transform((value) => value.toUpperCase()),
   name: z.string().trim().min(1, "fieldRequired").max(150, "fieldTooLong"),

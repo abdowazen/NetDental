@@ -2,6 +2,8 @@
 
 A Windows-first Electron application with a React/TypeScript renderer and a shared Fastify/PostgreSQL API. Includes authentication, patient registration, a dentist workspace, English/French translations, appearance preferences, and currency settings.
 
+For the complete client deployment procedure, see [Windows client installation](docs/windows-client-installation.md).
+
 ## Prerequisites and setup (PowerShell)
 
 Install Node.js 22.12 or newer supported LTS, npm, and PostgreSQL 17 or 18. PostgreSQL remains a separately installed and managed service. Docker is optional and is not used by the installed application.
@@ -70,7 +72,7 @@ Settings includes a clinic-wide base currency (USD by default, or LBP), manual d
 
 Enter rates as **1 USD = X LBP**, with up to six decimal places. Saving an existing date replaces that day's rate. All authenticated dentists can manage these shared settings. The applicable rate is today's rate, otherwise the latest available date in the same calendar year on or before today. Business dates use `Asia/Beirut`. Future dates are rejected; previous-year rates never substitute for missing current-year rates. If none exists, cross-currency conversion is unavailable until a rate is entered. Conversion uses decimal integer arithmetic and rounds half away from zero to two decimal places.
 
-`GET /currencies` returns the base currency, business date, current-year rates and effective rate. `PATCH /currencies` saves the base currency, and `PUT /currencies/rates` saves a daily rate. The shared `convertCurrency` helper supports USD/LBP conversion in both directions. No billing or payment records exist yet; future transaction features should retain the original currency, amount and applied rate/date on each transaction so later rate edits do not rewrite historical values.
+`GET /currencies` returns the base currency, business date, current-year rates and effective rate. `PATCH /currencies` saves the base currency, and `PUT /currencies/rates` saves a daily rate. The shared `convertCurrency` helper supports USD/LBP conversion in both directions. Patient payments and clinic expenses retain the original currency, amount, applied rate and base-currency snapshot so later rate edits do not rewrite historical values.
 
 ## LOCAL deployment
 

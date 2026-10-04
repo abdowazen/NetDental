@@ -19,7 +19,7 @@ export async function checkLaboratory(app: FastifyInstance, db: PrismaClient, pa
   assert.equal(automatic.laboratory, "Cedar Lab");
   assert.equal(automatic.material, "Zirconia");
   const id = automatic.id;
-  const details = { laboratory: "Cedar Lab", cost: "55", material: "Zirconia", shade: "A2", instructions: "Use scan", requestDate: clinicDate(), dueDate: clinicDate() };
+  const details = { laboratory: "Cedar Lab", cost: "55", currency: "USD", material: "Zirconia", shade: "A2", instructions: "Use scan", requestDate: clinicDate(), dueDate: clinicDate() };
   assert.equal((await app.inject({ method: "PUT", url: `${url}/${id}`, headers, payload: details })).statusCode, 204);
   assert.equal((await app.inject({ method: "POST", url: `${url}/${id}/status`, headers, payload: { action: "requested", date: clinicDate() } })).statusCode, 204);
   summary = (await app.inject({ url, headers })).json();
@@ -30,7 +30,7 @@ export async function checkLaboratory(app: FastifyInstance, db: PrismaClient, pa
     price: "70.00", date: new Date(`${clinicDate()}T00:00:00Z`), notes: "", status: "planned",
     teeth: { create: { tooth: 17, surfaces: [], role: "target" } }, events: { create: { status: "planned", date: new Date(`${clinicDate()}T00:00:00Z`), notes: "", actorId: (await db.user.findFirstOrThrow()).id } } }, include: { events: true } });
   assert.equal((await app.inject({ method: "POST", url: `${url}/drafts`, headers, payload: { treatmentId: voidTreatment.id, date: clinicDate() } })).statusCode, 201);
-  assert.equal((await app.inject({ method: "DELETE", url: `/api/odontogram/${patientId}/treatments/${voidTreatment.id}`, headers, payload: { reason: "Cancelled lab work", date: clinicDate() } })).statusCode, 204);
+  assert.equal((await app.inject({ method: "POST", url: `/api/odontogram/${patientId}/treatments/${voidTreatment.id}/void`, headers, payload: { reason: "Cancelled lab work", date: clinicDate() } })).statusCode, 204);
   summary = (await app.inject({ url, headers })).json();
   assert.equal(summary.requests.find((request: { treatmentId: string }) => request.treatmentId === voidTreatment.id).status, "voided");
   assert.equal(summary.totalCost, "55.00", "Voided laboratory costs are excluded");

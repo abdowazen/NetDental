@@ -17,7 +17,7 @@ export function laboratoryStore(db: PrismaClient): LaboratoryStore {
     return { id: row.id, treatmentId: row.treatmentId, patientId: row.patientId, planId: row.treatment.planId,
       planNumber: row.treatment.plan?.number ?? null, procedureCode: snapshot.code, procedureName: snapshot.name,
       teeth: row.treatment.teeth.map((item) => item.tooth), status: row.status as LabRequest["status"],
-      laboratory: row.laboratory, cost: row.cost.toFixed(2), material: row.material, shade: row.shade,
+      laboratory: row.laboratory, cost: row.cost.toFixed(2), currency: row.currency as LabRequest["currency"], material: row.material, shade: row.shade,
       instructions: row.instructions, requestDate: day(row.requestDate) ?? day(row.createdAt)!,
       dueDate: day(row.dueDate) ?? day(row.createdAt)!, receivedDate: day(row.receivedDate), createdAt: row.createdAt.toISOString(),
       events: row.events.map((event) => ({ id: event.id, action: event.action, date: day(event.date)!, actorId: event.actorId, recordedAt: event.recordedAt.toISOString() })) };
@@ -38,13 +38,13 @@ export function laboratoryStore(db: PrismaClient): LaboratoryStore {
         await db.$transaction(async (tx) => {
           const treatment = await tx.treatment.findFirst({ where: { id: treatmentId, patientId, patient: { roomId } }, include: { procedure: true } });
           if (!treatment || treatment.voidReason || treatment.status === "cancelled") throw new AccessError("NOT_FOUND");
-          const snapshot = treatment.snapshot as { requiresLab?: boolean; labLaboratory?: string; labDefaultCost?: string; labTurnaroundDays?: number; labMaterial?: string; labShade?: string; labInstructions?: string };
+          const snapshot = treatment.snapshot as { requiresLab?: boolean; labLaboratory?: string; labDefaultCost?: string; labCostCurrency?: "USD" | "LBP"; labTurnaroundDays?: number; labMaterial?: string; labShade?: string; labInstructions?: string };
           if (!snapshot.requiresLab) throw new AccessError("VALIDATION_ERROR");
           const requestDate = date(actionDate);
           const dueDate = new Date(requestDate); dueDate.setUTCDate(dueDate.getUTCDate() + (snapshot.labTurnaroundDays ?? treatment.procedure.labTurnaroundDays));
           await tx.labRequest.create({ data: { treatmentId, patientId, roomId, createdById: actorId,
             laboratory: snapshot.labLaboratory ?? treatment.procedure.labLaboratory,
-            cost: snapshot.labDefaultCost ?? treatment.procedure.labDefaultCost, material: snapshot.labMaterial ?? treatment.procedure.labMaterial,
+            cost: snapshot.labDefaultCost ?? treatment.procedure.labDefaultCost, currency: snapshot.labCostCurrency ?? "USD", material: snapshot.labMaterial ?? treatment.procedure.labMaterial,
             shade: snapshot.labShade ?? treatment.procedure.labShade, instructions: snapshot.labInstructions ?? treatment.procedure.labInstructions, requestDate, dueDate,
             events: { create: { action: "to_request", date: requestDate, actorId } } } });
         });
@@ -56,7 +56,7 @@ export function laboratoryStore(db: PrismaClient): LaboratoryStore {
     async updateLabRequest(patientId, roomId, actorId, id, input) {
       const row = await scoped(patientId, roomId, id);
       if (row.status !== "to_request") throw new AccessError("CONFLICT");
-      await db.labRequest.update({ where: { id }, data: { laboratory: input.laboratory, cost: input.cost, material: input.material,
+      await db.labRequest.update({ where: { id }, data: { laboratory: input.laboratory, cost: input.cost, currency: input.currency, material: input.material,
         shade: input.shade, instructions: input.instructions, requestDate: date(input.requestDate), dueDate: date(input.dueDate),
         events: { create: { action: "updated", date: date(input.requestDate), actorId } } } });
     },

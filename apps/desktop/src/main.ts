@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   shell,
   utilityProcess,
@@ -204,6 +205,14 @@ else {
     const allowed = (event: Electron.IpcMainInvokeEvent) =>
       event.sender === window?.webContents &&
       Boolean(event.senderFrame && isFallback(event.senderFrame.url));
+    const allowedApplication = (event: Electron.IpcMainInvokeEvent) => {
+      if (event.sender !== window?.webContents || !event.senderFrame || !target) return false;
+      try {
+        return new URL(event.senderFrame.url).origin === target;
+      } catch {
+        return false;
+      }
+    };
     ipcMain.handle("connection:state", (event) => {
       if (!allowed(event)) throw new Error("Forbidden");
       return { language, strings: localize(), failure };
@@ -218,6 +227,20 @@ else {
     ipcMain.handle("connection:retry", (event) => {
       if (!allowed(event)) throw new Error("Forbidden");
       return connect();
+    });
+    ipcMain.handle("backup:save", async (event, bytes: Uint8Array, suggestedName: string) => {
+      if (!allowedApplication(event) || !(bytes instanceof Uint8Array)) throw new Error("Forbidden");
+      const safeName = /^[a-zA-Z0-9._-]{1,160}\.dump$/.test(suggestedName)
+        ? suggestedName
+        : "NetDenty-backup.dump";
+      const selection = await dialog.showSaveDialog(window!, {
+        title: "Save NetDenty backup",
+        defaultPath: safeName,
+        filters: [{ name: "NetDenty PostgreSQL backup", extensions: ["dump"] }],
+      });
+      if (selection.canceled || !selection.filePath) return { saved: false };
+      writeFileSync(selection.filePath, Buffer.from(bytes));
+      return { saved: true };
     });
     await window.loadFile(fallbackFile);
     window.maximize();

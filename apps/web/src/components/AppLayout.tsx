@@ -11,14 +11,12 @@ import {
   Settings,
   Stethoscope,
   ClipboardList,
-  FileChartColumn,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Wallet,
   Tags,
   CreditCard,
-  ChartColumn,
   Package,
   Receipt,
   Boxes,
@@ -37,6 +35,7 @@ import { LanguageSelect } from "./LanguageSelect";
 import { UserMenu } from "./UserMenu";
 import { SidebarGroup } from "./SidebarGroup";
 import { ToothIcon } from "./ToothIcon";
+import { AnalyticsSidebar } from "./AnalyticsSidebar";
 import { api } from "../lib/api";
 function Sidebar({
   collapsed,
@@ -49,7 +48,9 @@ function Sidebar({
   const { user } = useAuth();
   const { pathname } = useLocation();
   const [clinicalExpanded, setClinicalExpanded] = useState(true);
-  const [clinicalReportsExpanded, setClinicalReportsExpanded] = useState(true);
+  const [procedureCatalogExpanded, setProcedureCatalogExpanded] = useState(
+    pathname.startsWith("/procedures") || pathname.startsWith("/laboratories"),
+  );
   const [settingsExpanded, setSettingsExpanded] = useState(
     pathname.startsWith("/settings"),
   );
@@ -110,7 +111,7 @@ function Sidebar({
                 "patients",
                 "treatment",
                 "actsProcedures",
-                "reportsListing",
+                "laboratoriesCatalog",
               ].some((screen) => allowed(user, screen as Screen))
             }
           >
@@ -156,150 +157,29 @@ function Sidebar({
               className="ml-5 mt-1 border-l border-white/30 pl-3"
             >
               {[
-                { label: "patients", icon: UsersRound },
-                { label: "treatment", icon: Stethoscope },
-                { label: "actsProcedures", icon: ClipboardList },
-                { label: "reportsListing", icon: FileChartColumn },
-              ]
-                .filter(({ label }) => allowed(user, label as Screen))
-                .map(({ label, icon: Icon }) => (
-                  <li key={label}>
-                    {label === "reportsListing" ? (
-                      <>
-                        <button
-                          type="button"
-                          className={`nav-item w-full text-left ${pathname.startsWith("/reports") ? "active" : ""}`}
-                          aria-expanded={clinicalReportsExpanded}
-                          aria-controls="clinical-reports-submenu"
-                          onClick={() =>
-                            setClinicalReportsExpanded((expanded) => !expanded)
-                          }
-                        >
-                          <Icon
-                            size={18}
-                            className="shrink-0"
-                            aria-hidden="true"
-                          />
-                          <span>{t(label)}</span>
-                          {clinicalReportsExpanded ? (
-                            <ChevronDown
-                              size={15}
-                              className="ml-auto"
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <ChevronRight
-                              size={15}
-                              className="ml-auto"
-                              aria-hidden="true"
-                            />
-                          )}
-                        </button>
-                        <ul
-                          id="clinical-reports-submenu"
-                          hidden={!clinicalReportsExpanded}
-                          className="ml-5 mt-1 border-l border-white/30 pl-3"
-                        >
-                          <li>
-                            <NavLink
-                              to="/reports/new-patients"
-                              className={({ isActive }) =>
-                                `nav-item w-full text-left ${isActive ? "active" : ""}`
-                              }
-                            >
-                              <UsersRound
-                                size={17}
-                                className="shrink-0"
-                                aria-hidden="true"
-                              />
-                              <span>{t("reportNewPatients")}</span>
-                            </NavLink>
-                          </li>
-                          <li>
-                            <button
-                              type="button"
-                              disabled
-                              className="nav-item w-full text-left opacity-50"
-                              title={`${t("reportPatientsStatement")} — ${t("comingSoon")}`}
-                              aria-label={`${t("reportPatientsStatement")} — ${t("comingSoon")}`}
-                            >
-                              <Receipt
-                                size={17}
-                                className="shrink-0"
-                                aria-hidden="true"
-                              />
-                              <span>
-                                <span className="block">
-                                  {t("reportPatientsStatement")}
-                                </span>
-                                <span className="mt-1 block text-[10px] leading-none">
-                                  {t("comingSoon")}
-                                </span>
-                              </span>
-                            </button>
-                          </li>
-                          <li>
-                            <button
-                              type="button"
-                              disabled
-                              className="nav-item w-full text-left opacity-50"
-                              title={`${t("reportLabStatement")} — ${t("comingSoon")}`}
-                              aria-label={`${t("reportLabStatement")} — ${t("comingSoon")}`}
-                            >
-                              <FlaskConical
-                                size={17}
-                                className="shrink-0"
-                                aria-hidden="true"
-                              />
-                              <span>
-                                <span className="block">
-                                  {t("reportLabStatement")}
-                                </span>
-                                <span className="mt-1 block text-[10px] leading-none">
-                                  {t("comingSoon")}
-                                </span>
-                              </span>
-                            </button>
-                          </li>
-                        </ul>
-                      </>
-                    ) : label === "patients" || label === "actsProcedures" || label === "treatment" ? (
-                      <NavLink
-                        to={label === "patients" ? "/patients" : label === "treatment" ? "/treatment" : "/procedures"}
-                        className={({ isActive }) =>
-                          `nav-item w-full text-left ${isActive ? "active" : ""}`
-                        }
-                      >
-                        <Icon
-                          size={18}
-                          className="shrink-0"
-                          aria-hidden="true"
-                        />
-                        <span>{t(label)}</span>
-                      </NavLink>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled
-                        className="nav-item w-full text-left opacity-50"
-                        title={`${t(label)} — ${t("comingSoon")}`}
-                        aria-label={`${t(label)} — ${t("comingSoon")}`}
-                      >
-                        <Icon
-                          size={18}
-                          className="shrink-0"
-                          aria-hidden="true"
-                        />
-                        <span>
-                          <span className="block">{t(label)}</span>
-                          <span className="mt-1 block text-[10px] leading-none">
-                            {t("comingSoon")}
-                          </span>
-                        </span>
-                      </button>
-                    )}
-                  </li>
-                ))}
+                { label: "patients", icon: UsersRound, to: "/patients" },
+                { label: "treatment", icon: Stethoscope, to: "/treatment" },
+              ].filter(({ label }) => allowed(user, label as Screen)).map(({ label, icon: Icon, to }) => (
+                <li key={label}>
+                  <NavLink to={to} className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}>
+                    <Icon size={18} className="shrink-0" aria-hidden="true"/>
+                    <span>{t(label)}</span>
+                  </NavLink>
+                </li>
+              ))}
+              {(allowed(user, "actsProcedures") || allowed(user, "laboratoriesCatalog")) && (
+                <li>
+                  <button type="button" className={`nav-item w-full text-left ${pathname.startsWith("/procedures") || pathname.startsWith("/laboratories") ? "active" : ""}`}
+                    aria-expanded={procedureCatalogExpanded} aria-controls="procedure-catalog-submenu" onClick={() => setProcedureCatalogExpanded((expanded) => !expanded)}>
+                    <ClipboardList size={18} className="shrink-0" aria-hidden="true"/><span>{t("actsProcedures")}</span>
+                    {procedureCatalogExpanded ? <ChevronDown size={15} className="ml-auto" aria-hidden="true"/> : <ChevronRight size={15} className="ml-auto" aria-hidden="true"/>}
+                  </button>
+                  <ul id="procedure-catalog-submenu" hidden={!procedureCatalogExpanded} className="ml-5 mt-1 border-l border-white/30 pl-3">
+                    {allowed(user, "actsProcedures") && <li><NavLink to="/procedures" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><ClipboardList size={17} className="shrink-0" aria-hidden="true"/><span>{t("procedures")}</span></NavLink></li>}
+                    {allowed(user, "laboratoriesCatalog") && <li><NavLink to="/laboratories" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><FlaskConical size={17} className="shrink-0" aria-hidden="true"/><span>{t("laboratoriesCatalog")}</span></NavLink></li>}
+                  </ul>
+                </li>
+              )}
             </ul>
           </div>
           <SidebarGroup
@@ -308,9 +188,8 @@ function Sidebar({
             collapsed={collapsed}
             expandSidebar={toggle}
             items={[
-              { label: "billsCategories", icon: Tags },
-              { label: "payments", icon: CreditCard },
-              { label: "reportsAnalytics", icon: ChartColumn },
+              { label: "billsPayments", icon: CreditCard, to: "/bills-payments" },
+              { label: "billsCategories", icon: Tags, to: "/bill-categories" },
             ]}
           />
           <SidebarGroup
@@ -319,12 +198,13 @@ function Sidebar({
             collapsed={collapsed}
             expandSidebar={toggle}
             items={[
-              { label: "purchaseInvoice", icon: Receipt },
-              { label: "suppliesMaterials", icon: Boxes },
-              { label: "suppliersVendors", icon: Truck },
+              { label: "purchaseInvoice", icon: Receipt, to: "/purchase-invoices" },
+              { label: "suppliesMaterials", icon: Boxes, to: "/supplies" },
+              { label: "suppliersVendors", icon: Truck, to: "/suppliers" },
             ]}
           />
-          {allowed(user, "settings") && (
+          <AnalyticsSidebar collapsed={collapsed} expandSidebar={toggle} />
+          {(allowed(user, "settings") || allowed(user, "currencySetup") || allowed(user, "backupRestore") || allowed(user, "help")) && (
             <div>
               <button
                 type="button"
@@ -359,7 +239,7 @@ function Sidebar({
                 hidden={!settingsVisible}
                 className="ml-5 mt-1 border-l border-white/30 pl-3"
               >
-                <li>
+                {allowed(user, "settings") && <li>
                   <NavLink
                     to="/settings/general"
                     className={({ isActive }) =>
@@ -369,8 +249,8 @@ function Sidebar({
                     <SlidersHorizontal size={18} className="shrink-0" aria-hidden="true" />
                     <span>{t("generalSettings")}</span>
                   </NavLink>
-                </li>
-                <li>
+                </li>}
+                {allowed(user, "currencySetup") && <li>
                   <NavLink
                     to="/settings/currency"
                     className={({ isActive }) =>
@@ -380,25 +260,19 @@ function Sidebar({
                     <CircleDollarSign size={18} className="shrink-0" aria-hidden="true" />
                     <span>{t("currencySetup")}</span>
                   </NavLink>
-                </li>
-                <li>
-                  <button
-                    type="button"
-                    disabled
-                    className="nav-item w-full text-left opacity-50"
-                    title={`${t("backupRestore")} — ${t("comingSoon")}`}
-                    aria-label={`${t("backupRestore")} — ${t("comingSoon")}`}
+                </li>}
+                {allowed(user, "backupRestore") && <li>
+                  <NavLink
+                    to="/settings/backup"
+                    className={({ isActive }) =>
+                      `nav-item w-full text-left ${isActive ? "active" : ""}`
+                    }
                   >
                     <DatabaseBackup size={18} className="shrink-0" aria-hidden="true" />
-                    <span>
-                      <span className="block">{t("backupRestore")}</span>
-                      <span className="mt-1 block text-[10px] leading-none">
-                        {t("comingSoon")}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-                <li>
+                    <span>{t("backupRestore")}</span>
+                  </NavLink>
+                </li>}
+                {allowed(user, "help") && <li>
                   <NavLink
                     to="/settings/help"
                     className={({ isActive }) =>
@@ -408,7 +282,7 @@ function Sidebar({
                     <CircleHelp size={18} className="shrink-0" aria-hidden="true" />
                     <span>{t("help")}</span>
                   </NavLink>
-                </li>
+                </li>}
               </ul>
             </div>
           )}
@@ -503,7 +377,7 @@ function Header() {
       <div className="min-w-0 space-y-2">
         <h1 className="truncate text-lg font-semibold tracking-tight">
           {t(
-            pathname === "/admin/users"
+            pathname.startsWith("/admin/users")
               ? "manageUsers"
               : pathname === "/admin/locations"
                 ? "clinicsRooms"
@@ -515,12 +389,18 @@ function Header() {
                 ? "patients"
                 : pathname.startsWith("/procedures")
                   ? "actsProcedures"
+                : pathname.startsWith("/bill-categories")
+                  ? "billsCategories"
+                : pathname.startsWith("/bills-payments")
+                  ? "billsPayments"
                 : pathname === "/treatment"
                   ? "treatment"
                 : pathname === "/settings/currency"
                   ? "currencySetup"
                 : pathname === "/settings/help"
                   ? "help"
+                : pathname === "/settings/backup"
+                  ? "backupRestore"
                 : pathname.startsWith("/settings")
                   ? "generalSettings"
                 : pathname.startsWith("/reports")
@@ -552,7 +432,7 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const { t } = useTranslation();
   const { pathname } = useLocation();
-  const patientForm = pathname.startsWith("/patients") || pathname.startsWith("/procedures") || pathname.startsWith("/reports") || pathname === "/treatment";
+  const patientForm = pathname.startsWith("/patients") || pathname.startsWith("/procedures") || pathname.startsWith("/bill-categories") || pathname.startsWith("/bills-payments") || pathname.startsWith("/reports") || pathname === "/treatment";
   return (
     <div className="flex min-h-screen">
       <a href="#main" className="skip-link">

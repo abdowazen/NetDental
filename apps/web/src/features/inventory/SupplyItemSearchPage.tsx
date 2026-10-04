@@ -1,0 +1,40 @@
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { allowed, type SupplyItem, type SupplyItemList, type SupplyItemSearch } from "@clinic/shared";
+import { useAuth } from "../auth/AuthProvider";
+import { useWorkspace } from "../auth/WorkspaceProvider";
+import { api, errorKey } from "../../lib/api";
+import { Button, ErrorMessage } from "../../components/ui";
+import { Pagination } from "../../components/Pagination";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+
+export function SupplyItemSearchPage() {
+  const { t, i18n } = useTranslation(); const { user } = useAuth(); const { roomId } = useWorkspace();
+  const navigate = useNavigate(); const location = useLocation(); const client = useQueryClient();
+  const [filtersOpen, setFiltersOpen] = useState(true); const [search, setSearch] = useState(""); const [debounced, setDebounced] = useState("");
+  const [page, setPage] = useState(1); const [pageSize, setPageSize] = useState(30);
+  const [sort, setSort] = useState<SupplyItemSearch["sort"]>("id"); const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [deleting, setDeleting] = useState<SupplyItem | null>(null);
+  useEffect(() => { const timer = setTimeout(() => { setDebounced(search.trim()); setPage(1); }, 250); return () => clearTimeout(timer); }, [search]);
+  const query = useQuery({ queryKey: ["supplies", roomId, debounced, page, pageSize, sort, direction], queryFn: ({ signal }) => api<SupplyItemList>(`/api/supplies?${new URLSearchParams({ q: debounced, page: String(page), pageSize: String(pageSize), sort, direction })}`, { signal }) });
+  const remove = useMutation({ mutationFn: (item: SupplyItem) => api(`/api/supplies/${item.id}`, { method: "DELETE" }), onSuccess: async () => { setDeleting(null); await client.invalidateQueries({ queryKey: ["supplies"] }); } });
+  const canCreate = allowed(user, "suppliesMaterials", "create"); const canModify = allowed(user, "suppliesMaterials", "modify"); const canDelete = allowed(user, "suppliesMaterials", "delete");
+  const rows = query.data?.items ?? []; const waiting = search.trim() !== debounced;
+  const money = (item: SupplyItem) => new Intl.NumberFormat(i18n.language, { style: "currency", currency: item.currency, maximumFractionDigits: 2 }).format(Number(item.defaultPrice));
+  const date = (value: string) => value ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—";
+  const columns = [["name","supplyItemName"],["brand","supplyBrand"],["supplier","supplySupplier"],["openingBalance","supplyOpeningBalance"],["defaultPrice","supplyDefaultPrice"],["currentQuantity","supplyCurrentStock"],["date","supplyDate"],["expiryDate","supplyExpiryDate"]] as const;
+  const sortBy = (column: SupplyItemSearch["sort"]) => { setDirection(sort === column && direction === "asc" ? "desc" : "asc"); setSort(column); setPage(1); };
+  return <>
+    <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center justify-between gap-3 bg-canvas py-1"><div><h2 className="text-2xl font-semibold tracking-tight">{t("suppliesMaterials")}</h2><p className="mt-1 text-sm text-muted">{t("supplyDescription")}</p></div>{canCreate && <Link className="button" to="/supplies/new"><Plus size={18}/>{t("supplyNew")}</Link>}</div>
+    {location.state?.saved && <p role="status" className="mb-3 text-sm text-accent-ink">{t("supplySaved")}</p>}
+    <section className="card mb-3 patient-search-filters"><button type="button" className="flex w-full items-center gap-2 rounded-xl px-4 py-2 text-left text-sm font-semibold hover:bg-soft" aria-expanded={filtersOpen} aria-controls="supply-filters" onClick={() => setFiltersOpen((value) => !value)}><Search size={18}/><span>{t("patientFilters")}</span>{search.trim() && <span className="rounded-full bg-accent-soft px-2 py-1 text-xs text-accent-ink">{t("activeFilters", { count: 1 })}</span>}<ChevronDown size={18} className={`ml-auto transition-transform ${filtersOpen ? "" : "-rotate-90"}`}/></button><div id="supply-filters" hidden={!filtersOpen} className="px-4 pb-3"><div className="flex items-center gap-3"><div className="relative min-w-48 flex-1"><Search size={20} className="absolute left-3 top-2.5 text-muted"/><input type="search" className="input pl-10" aria-label={t("supplySearch")} placeholder={t("supplySearch")} maxLength={100} value={search} onChange={(event) => setSearch(event.target.value)}/></div><button className="rounded-lg border border-line px-3 py-2 text-sm" onClick={() => setSearch("")}>{t("clearFilters")}</button></div></div></section>
+    {(query.error || remove.error) && <div className="mb-3"><ErrorMessage message={t(errorKey(query.error ?? remove.error))}/><Button className="mt-3" onClick={() => void query.refetch()}>{t("retry")}</Button></div>}
+    {(query.isPending || waiting) && <p role="status" className="py-5 text-muted">{t("loading")}</p>}
+    {!query.isPending && !query.error && !waiting && rows.length === 0 && <div className="card p-10 text-center"><p className="mb-5 text-muted">{t("supplyEmpty")}</p>{canCreate && <Link className="button" to="/supplies/new">{t("supplyNew")}</Link>}</div>}
+    {!waiting && !query.error && rows.length > 0 && <section className="card overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-line bg-soft text-muted"><tr>{columns.map(([column,label]) => <th key={column} aria-sort={sort === column ? direction === "asc" ? "ascending" : "descending" : "none"} className="whitespace-nowrap px-3 py-2 font-medium"><button className="inline-flex items-center gap-2" onClick={() => sortBy(column)}>{t(label)}<span aria-hidden="true">{sort === column ? direction === "asc" ? "↑" : "↓" : "↕"}</span></button></th>)}<th className="px-3 py-2 font-medium">{t("patientActions")}</th></tr></thead><tbody>{rows.map((item) => <tr key={item.id} className="cursor-pointer border-b border-line hover:bg-soft" onClick={() => navigate(`/supplies/${item.id}`)}><td className="px-3 py-2 font-semibold text-accent-ink">{item.name}</td><td className="px-3 py-2">{item.brand}</td><td className="px-3 py-2">{item.supplierName ?? "—"}</td><td className="px-3 py-2 tabular-nums">{Number(item.openingBalance).toLocaleString(i18n.language, { maximumFractionDigits: 3 })}</td><td className="whitespace-nowrap px-3 py-2 font-medium tabular-nums">{money(item)}</td><td className="px-3 py-2 font-semibold tabular-nums">{Number(item.currentQuantity).toLocaleString(i18n.language, { maximumFractionDigits: 3 })}</td><td className="whitespace-nowrap px-3 py-2">{date(item.date)}</td><td className="whitespace-nowrap px-3 py-2">{date(item.expiryDate)}</td><td className="px-3 py-1" onClick={(event) => event.stopPropagation()}><div className="flex gap-1"><Link className="rounded p-2 text-accent-ink hover:bg-accent-soft" aria-label={`${t(canModify ? "supplyEdit" : "permission_view")} ${item.name}`} to={`/supplies/${item.id}`}><Pencil size={16}/></Link>{canDelete && <button className="rounded p-2 text-danger-ink hover:bg-danger-soft" aria-label={`${t("supplyDelete")} ${item.name}`} onClick={() => setDeleting(item)}><Trash2 size={16}/></button>}</div></td></tr>)}</tbody></table></div><Pagination page={page} pageSize={pageSize} total={query.data?.total ?? 0} busy={query.isFetching} label={t("supplyPagination")} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}/></section>}
+    {deleting && <ConfirmDialog title={t("supplyDeleteTitle")} message={t("supplyDeleteMessage", { name: deleting.name })} pending={remove.isPending} error={remove.error ? t(errorKey(remove.error)) : undefined} confirmLabel={t("supplyDelete")} onCancel={() => setDeleting(null)} onConfirm={() => remove.mutate(deleting)}/>} 
+  </>;
+}

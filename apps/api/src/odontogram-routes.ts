@@ -10,7 +10,13 @@ export function registerOdontogram(app: FastifyInstance, store: OdontogramStore,
   app.post("/api/odontogram/:patientId/sessions", { bodyLimit: 32768 }, async (req, reply) => {
     const { roomId, actorId } = await scope(req, "create");
     const input = treatmentSchema.refine((value) => value.planId === null, "VALIDATION_ERROR").parse(req.body);
-    await store.addTreatment(params.parse(req.params).patientId, roomId, actorId, input, true);
+    await store.addTreatment(params.parse(req.params).patientId, roomId, actorId, input, "session");
+    return reply.status(201).send({ ok: true });
+  });
+  app.post("/api/odontogram/:patientId/completed-treatments", { bodyLimit: 32768 }, async (req, reply) => {
+    const { roomId, actorId } = await scope(req, "create");
+    const input = treatmentSchema.refine((value) => value.planId === null, "VALIDATION_ERROR").parse(req.body);
+    await store.addTreatment(params.parse(req.params).patientId, roomId, actorId, input, "completed");
     return reply.status(201).send({ ok: true });
   });
   app.post("/api/odontogram/:patientId/plans", async (req, reply) => {
@@ -24,6 +30,11 @@ export function registerOdontogram(app: FastifyInstance, store: OdontogramStore,
     await store.savePlanTotal(params.parse(req.params).patientId, roomId, actorId, planTotalSchema.parse(req.body));
     return reply.status(204).send();
   });
+  app.put("/api/odontogram/:patientId/unplanned-discount", async (req, reply) => {
+    const { roomId, actorId } = await scope(req, "modify");
+    await store.saveUnplannedTotal(params.parse(req.params).patientId, roomId, actorId, planTotalSchema.parse(req.body));
+    return reply.status(204).send();
+  });
   app.put("/api/odontogram/:patientId/treatments/:id", async (req, reply) => {
     const { roomId, actorId } = await scope(req, "modify");
     const p = params.parse(req.params);
@@ -31,9 +42,9 @@ export function registerOdontogram(app: FastifyInstance, store: OdontogramStore,
     return reply.status(204).send();
   });
   app.delete("/api/odontogram/:patientId/treatments/:id", async (req, reply) => {
-    const { roomId, actorId } = await scope(req, "delete");
+    const { roomId } = await scope(req, "delete");
     const p = params.parse(req.params);
-    await store.voidTreatment(p.patientId, roomId, actorId, p.id!, voidSchema.parse(req.body));
+    await store.deleteTreatment(p.patientId, roomId, p.id!);
     return reply.status(204).send();
   });
   app.get("/api/odontogram/:patientId", async (req) => {

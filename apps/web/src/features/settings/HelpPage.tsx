@@ -8,10 +8,10 @@ const currentBehaviorKeys = [
   "helpCurrentFinance",
   "helpCurrentFiles",
   "helpCurrentAccess",
+  "helpCurrentBackup",
 ] as const;
 
 const futureBehaviorKeys = [
-  "helpFutureBackup",
   "helpFutureStatements",
   "helpFutureBilling",
   "helpFutureInventory",

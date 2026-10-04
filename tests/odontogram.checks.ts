@@ -26,9 +26,16 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   const finding = { description: "Existing filling", teeth: [association(16, ["occlusal"])], date: "2026-01-01", notes: "" };
   assert.equal((await write("/findings", finding)).statusCode, 201);
   assert.equal((await chart()).treatments.length, 0, "Findings must not create treatments/charges");
-  const p = await db.procedure.create({ data: { roomId, code: "RCTX", name: "Test root canal", category: "endodontics", defaultPrice: "100.00", dentition: "both", scope: "single_tooth", requiresLab: true, labLaboratory: "Cedar Lab", labDefaultCost: "40.00", labTurnaroundDays: 7, labMaterial: "Zirconia", labShade: "A2", labInstructions: "Use scan" } });
-  const input = { procedureId: p.id, mode: "independent", teeth: [association(16)], date: "2026-02-01", notes: "", price: "100.00" };
-  assert.equal((await write("/treatments", input)).statusCode, 201);
+  const cedarLab = await db.laboratory.create({ data: { roomId, name: "Cedar Lab", defaultCost: "40.00", turnaroundDays: 7, material: "Zirconia", shade: "A2", instructions: "Use scan" } });
+  const p = await db.procedure.create({ data: { roomId, code: "RCTX", name: "Test root canal", category: "endodontics", defaultPrice: "100.00", dentition: "both", scope: "single_tooth", requiresLab: true } });
+  await db.laboratoryProcedureRate.create({ data: { laboratoryId: cedarLab.id, procedureId: p.id, cost: "40.00", currency: "USD", turnaroundDays: 7 } });
+  const input = { procedureId: p.id, laboratoryId: cedarLab.id, mode: "independent", teeth: [association(16)], date: "2026-02-01", notes: "", price: "100.00" };
+  assert.equal((await write("/treatments", { ...input, laboratoryId: undefined })).statusCode, 400);
+  assert.equal((await write("/treatments", { ...input, labMaterial: "Lithium disilicate", labShade: "A3", labInstructions: "Custom treatment instructions" })).statusCode, 201);
+  const customizedLabRequest = await db.labRequest.findFirstOrThrow({ where: { patientId, treatment: { procedureId: p.id } }, orderBy: { createdAt: "desc" } });
+  assert.equal(customizedLabRequest.material, "Lithium disilicate");
+  assert.equal(customizedLabRequest.shade, "A3");
+  assert.equal(customizedLabRequest.instructions, "Custom treatment instructions");
   assert.equal((await write("/treatments", { ...input, date: "2026-03-01" })).statusCode, 201);
   let data = await chart();
   assert.equal(data.treatments.length, 2);
@@ -54,6 +61,11 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   assert.equal(bridgeRecord.category, "fixed_prosthodontics");
   assert.equal(bridgeRecord.teeth.length, 3);
   assert.equal(bridgeRecord.teeth.find((r) => r.tooth === 15)?.role, "pontic");
+  assert.equal((await write("/treatments", { ...bridgeInput, teeth: [] })).statusCode, 201,
+    "Multiple-teeth procedures can be planned without selecting teeth");
+  assert.equal((await write("/treatments", { ...bridgeInput, teeth: [association(14)] })).statusCode, 400,
+    "An explicit multiple-teeth association must contain at least two teeth");
+  assert.ok((await chart()).treatments.some((record) => record.procedureId === bridge.id && record.teeth.length === 0));
   await db.procedure.update({ where: { id: bridge.id }, data: { name: "Changed name", defaultPrice: "1200", category: "other" } });
   assert.equal((await chart()).treatments.find((r) => r.id === bridgeRecord.id)?.category, "fixed_prosthodontics");
   assert.equal((await chart()).treatments.find((r) => r.id === bridgeRecord.id)?.price, "900.00");
@@ -108,9 +120,9 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   assert.ok(["20.50", "10.00"].includes(totalSaved.discount.value));
   assert.equal((await write("/plan-discount", { discount: { type: "amount", value: "0" }, expectedId: totalSaved.id }, "PUT")).statusCode, 204);
   assert.equal((await chart()).planDiscount?.discount.value, "0.00");
-  assert.equal((await app.inject({ url: editUrl, method: "DELETE", headers: staffHeaders, payload: { reason: "Removed", date: "2026-06-01" } })).statusCode, 403);
-  assert.equal((await app.inject({ url: editUrl, method: "DELETE", headers, payload: { reason: "Removed", date: "2026-06-01" } })).statusCode, 204);
-  assert.equal((await chart()).treatments.find((t) => t.id === bridgeRecord.id)?.voidReason, "Removed");
+  assert.equal((await app.inject({ url: editUrl, method: "DELETE", headers: staffHeaders, payload: {} })).statusCode, 403);
+  assert.equal((await app.inject({ url: editUrl, method: "DELETE", headers, payload: {} })).statusCode, 204);
+  assert.equal((await chart()).historyTreatments?.some((t) => t.id === bridgeRecord.id), false);
   const oldPlan = (await chart()).plan!;
   const oldCount = await db.treatment.count({ where: { patientId, planId: oldPlan.id } });
   assert.equal((await app.inject({ url: url + "/plans", method: "POST", headers: staffHeaders, payload: { expectedPlanId: oldPlan.id } })).statusCode, 403);
@@ -130,6 +142,65 @@ export async function checkOdontogram(app: FastifyInstance, db: PrismaClient, pa
   assert.equal((await write("/treatments", input)).statusCode, 201);
   assert.equal((await chart()).treatments.length, 1);
   assert.equal(await db.treatment.count({ where: { patientId, planId: fresh.plan!.id } }), 1);
+  const unplannedProcedure = await db.procedure.create({ data: {
+    roomId, code: "WALKIN", name: "Unplanned treatment", category: "other",
+    defaultPrice: "35.00", dentition: "both", scope: "single_tooth",
+    requiresLab: true, labLaboratory: "Walk-in Lab", labDefaultCost: "15.00",
+    labTurnaroundDays: 2, labMaterial: "Composite", labShade: "A2",
+  } });
+  const walkInLab = await db.laboratory.create({ data: { roomId, name: "Walk-in Lab", defaultCost: "15.00", turnaroundDays: 2, material: "Composite", shade: "A2" } });
+  await db.laboratoryProcedureRate.create({ data: { laboratoryId: walkInLab.id, procedureId: unplannedProcedure.id, cost: "15.00", currency: "USD", turnaroundDays: 2 } });
+  const completedUnplanned = await app.inject({
+    url: url + "/completed-treatments", method: "POST", headers,
+    payload: { ...input, procedureId: unplannedProcedure.id, laboratoryId: walkInLab.id, planId: null, price: "1.00" },
+  });
+  assert.equal(completedUnplanned.statusCode, 201, completedUnplanned.body);
+  const unplannedRecord = (await chart()).historyTreatments?.find((record) => record.procedureId === unplannedProcedure.id);
+  assert.equal(unplannedRecord?.planId, null);
+  assert.equal(unplannedRecord?.status, "completed");
+  assert.equal(unplannedRecord?.price, "35.00", "Unplanned treatment uses the catalog price snapshot");
+  assert.deepEqual(unplannedRecord?.events.map((event) => event.status), ["completed"]);
+  const unplannedLabRequest = await db.labRequest.findUnique({ where: { treatmentId: unplannedRecord!.id } });
+  assert.equal(unplannedLabRequest?.status, "to_request", "Unplanned laboratory work appears in Laboratory");
+  assert.equal(unplannedLabRequest?.laboratory, "Walk-in Lab");
+  assert.equal((await app.inject({
+    url: `${url}/treatments/${unplannedRecord!.id}`, method: "PUT", headers,
+    payload: { discount: { type: "amount", value: "5.00" }, date: unplannedRecord!.date, notes: "Net price adjustment", expectedVersion: unplannedRecord!.version },
+  })).statusCode, 204, "Completed unplanned treatment pricing can be adjusted with an audit event");
+  const adjustedUnplanned = (await chart()).historyTreatments!.find((record) => record.id === unplannedRecord!.id)!;
+  assert.deepEqual(adjustedUnplanned.discount, { type: "amount", value: "5.00" });
+  assert.equal(adjustedUnplanned.status, "completed");
+  assert.equal((await app.inject({
+    url: `${url}/treatments/${unplannedRecord!.id}`, method: "PUT", headers,
+    payload: { discount: { type: "amount", value: "0.00" }, date: adjustedUnplanned.date, notes: "", expectedVersion: adjustedUnplanned.version },
+  })).statusCode, 204);
+  const savedUnplannedTotal = await app.inject({ method: "PUT", url: url + "/unplanned-discount", headers,
+    payload: { discount: { type: "amount", value: "5.00" }, expectedId: null, planId: null } });
+  assert.equal(savedUnplannedTotal.statusCode, 204, savedUnplannedTotal.body);
+  const unplannedTotal = (await chart()).unplannedDiscount!;
+  assert.deepEqual(unplannedTotal.discount, { type: "amount", value: "5.00" });
+  assert.equal((await app.inject({ method: "PUT", url: url + "/unplanned-discount", headers,
+    payload: { discount: { type: "amount", value: "0.00" }, expectedId: unplannedTotal.id, planId: null } })).statusCode, 204);
+  assert.equal((await app.inject({
+    url: url + "/completed-treatments", method: "POST", headers,
+    payload: { ...input, procedureId: unplannedProcedure.id, laboratoryId: walkInLab.id, planId: fresh.plan!.id },
+  })).statusCode, 400);
+  const beforeDeleteIds = new Set((await chart()).historyTreatments!.map((record) => record.id));
+  assert.equal((await app.inject({ url: url + "/completed-treatments", method: "POST", headers,
+    payload: { ...input, procedureId: unplannedProcedure.id, laboratoryId: walkInLab.id, planId: null } })).statusCode, 201);
+  const deletionCandidate = (await chart()).historyTreatments!.find((record) => !beforeDeleteIds.has(record.id))!;
+  const deletionLab = await db.labRequest.findUniqueOrThrow({ where: { treatmentId: deletionCandidate.id } });
+  assert.equal((await app.inject({ url: `${url}/treatments/${deletionCandidate.id}`, method: "DELETE", headers, payload: {} })).statusCode, 204);
+  assert.equal(await db.treatment.count({ where: { id: deletionCandidate.id } }), 0);
+  assert.equal(await db.treatmentEvent.count({ where: { treatmentId: deletionCandidate.id } }), 0);
+  assert.equal(await db.treatmentTooth.count({ where: { treatmentId: deletionCandidate.id } }), 0);
+  assert.equal(await db.labRequest.count({ where: { id: deletionLab.id } }), 0);
+  assert.equal(await db.labRequestEvent.count({ where: { requestId: deletionLab.id } }), 0);
+  assert.equal((await chart()).historyTreatments!.some((record) => record.id === deletionCandidate.id), false);
+  const laboratoryAfterDelete = (await app.inject({ url: `/api/laboratory/${patientId}`, headers })).json();
+  assert.equal(laboratoryAfterDelete.requests.some((request: { treatmentId: string }) => request.treatmentId === deletionCandidate.id), false);
+  const paymentsAfterDelete = (await app.inject({ url: `/api/payments/${patientId}`, headers })).json();
+  assert.equal(paymentsAfterDelete.ledger.some((entry: { id: string }) => entry.id === deletionCandidate.id), false);
   const walkIn = await db.patient.create({ data: { roomId, firstName: "WalkIn", lastName: "Patient", fullName: "WalkIn Patient", phone: "+961 3 123456", gender: "Female", firstVisit: new Date("2026-01-01") } });
   const walkUrl = `/api/odontogram/${walkIn.id}`;
   assert.equal((await app.inject({ url: walkUrl + "/sessions", method: "POST", headers: staffHeaders, payload: input })).statusCode, 403);
