@@ -123,12 +123,27 @@ export function reportStore(db: PrismaClient): ReportStore {
           : { [input.sort]: input.direction };
       const payableStatuses = input.status === "all" ? ["requested", "received"] : ["requested", "received"].includes(input.status) ? [input.status] : [];
       const payableWhere = { ...where, status: { in: payableStatuses } } satisfies Prisma.LabRequestWhereInput;
-      const [total, rows, usdTotal, lbpTotal] = await db.$transaction([
+      const paymentWhere: Prisma.BillExpenseWhereInput = {
+        roomId,
+        laboratoryId: input.laboratoryId ?? { not: null },
+        date: requestDate,
+      };
+      const [total, rows, usdTotal, lbpTotal, usdPayments, lbpPayments] = await db.$transaction([
         db.labRequest.count({ where }),
         db.labRequest.findMany({ where, include: { patient: true, treatment: { include: { teeth: true } } }, orderBy: [orderBy, { id: input.direction }], skip: (input.page - 1) * input.pageSize, take: input.pageSize }),
         db.labRequest.aggregate({ where: { ...payableWhere, currency: "USD" }, _sum: { cost: true } }),
         db.labRequest.aggregate({ where: { ...payableWhere, currency: "LBP" }, _sum: { cost: true } }),
+        db.billExpense.aggregate({ where: { ...paymentWhere, currency: "USD" }, _sum: { amount: true } }),
+        db.billExpense.aggregate({ where: { ...paymentWhere, currency: "LBP" }, _sum: { amount: true } }),
       ]);
+      const payable = {
+        USD: usdTotal._sum.cost ?? new Prisma.Decimal(0),
+        LBP: lbpTotal._sum.cost ?? new Prisma.Decimal(0),
+      };
+      const paid = {
+        USD: usdPayments._sum.amount ?? new Prisma.Decimal(0),
+        LBP: lbpPayments._sum.amount ?? new Prisma.Decimal(0),
+      };
       return { total, rows: rows.map((row) => {
         const snapshot = row.treatment.snapshot as { code: string; name: string };
         return { id: row.id, laboratoryId: row.treatment.laboratoryId, laboratory: row.laboratory, patientId: row.patientId,
@@ -138,10 +153,11 @@ export function reportStore(db: PrismaClient): ReportStore {
           receivedDate: row.receivedDate ? dateText(row.receivedDate) : null, status: row.status as "to_request" | "requested" | "received" | "voided",
           cost: row.cost.toFixed(2), currency: row.currency as "USD" | "LBP",
         };
-      }), payableTotals: [
-        { currency: "USD", amount: (usdTotal._sum.cost ?? new Prisma.Decimal(0)).toFixed(2) },
-        { currency: "LBP", amount: (lbpTotal._sum.cost ?? new Prisma.Decimal(0)).toFixed(2) },
-      ] };
+      }),
+        payableTotals: (["USD", "LBP"] as const).map((currency) => ({ currency, amount: payable[currency].toFixed(2) })),
+        paymentTotals: (["USD", "LBP"] as const).map((currency) => ({ currency, amount: paid[currency].toFixed(2) })),
+        balanceTotals: (["USD", "LBP"] as const).map((currency) => ({ currency, amount: payable[currency].minus(paid[currency]).toFixed(2) })),
+      };
     },
     async getPatientStatement(input, roomId) {
       const patientWhere = { roomId, ...(input.patientId ? { id: input.patientId } : {}) };

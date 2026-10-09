@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { User, Language } from "@clinic/shared";
+import type { User, Language, DefaultPage } from "@clinic/shared";
 import { api, ApiError } from "../../lib/api";
 import { ConnectionScreen, Loading } from "../../components/ui";
 type Auth = {
@@ -16,6 +16,7 @@ type Auth = {
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   changeLanguage: (language: Language) => Promise<void>;
+  changeDefaultPage: (page: DefaultPage) => Promise<void>;
   saving: boolean;
 };
 const Context = createContext<Auth | null>(null);
@@ -58,12 +59,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener("clinic:unavailable", offline);
     return () => window.removeEventListener("clinic:unavailable", offline);
   }, []);
-  const languageMutation = useMutation({
-    mutationFn: async (preferredLanguage: Language) =>
+  const preferencesMutation = useMutation({
+    mutationFn: async (preferences: {
+      preferredLanguage?: Language;
+      defaultPage?: DefaultPage;
+    }) =>
       (
         await api<{ user: User }>("/users/me/preferences", {
           method: "PATCH",
-          body: JSON.stringify({ preferredLanguage }),
+          body: JSON.stringify(preferences),
         })
       ).user,
     onSuccess: (user) => {
@@ -88,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   const value: Auth = {
     user: session.data ?? null,
-    saving: languageMutation.isPending,
+    saving: preferencesMutation.isPending,
     async login(username, password) {
       const { user } = await api<{ user: User }>("/auth/login", {
         method: "POST",
@@ -106,8 +110,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clear();
     },
     async changeLanguage(language) {
-      if (session.data) await languageMutation.mutateAsync(language);
+      if (session.data)
+        await preferencesMutation.mutateAsync({ preferredLanguage: language });
       else await i18n.changeLanguage(language);
+    },
+    async changeDefaultPage(defaultPage) {
+      if (session.data)
+        await preferencesMutation.mutateAsync({ defaultPage });
     },
   };
   return <Context.Provider value={value}>{children}</Context.Provider>;

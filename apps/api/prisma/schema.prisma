@@ -23,6 +23,7 @@ model User {
   displayName String @db.VarChar(100)
   role Role @default(DENTIST)
   preferredLanguage Language @default(en)
+  defaultPage String @default("automatic") @db.VarChar(40)
   isActive Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -35,6 +36,9 @@ model User {
   patientFilesUploaded PatientFile[] @relation("PatientFileUploadedBy")
   billExpensesCreated BillExpense[] @relation("BillExpenseCreatedBy")
   purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
+  appointments Appointment[] @relation("AppointmentDentist")
+  appointmentsCreated Appointment[] @relation("AppointmentCreatedBy")
+  appointmentEvents AppointmentEvent[] @relation("AppointmentEventActor")
 }
 model Session {
   id String @id @default(uuid())
@@ -91,6 +95,7 @@ model Patient {
   payments Payment[]
   labRequests LabRequest[]
   files PatientFile[]
+  appointments Appointment[]
   roomId Int @default(1)
   room SurgicalRoom @relation(fields: [roomId], references: [id])
   id Int @id @default(autoincrement())
@@ -131,7 +136,45 @@ model SurgicalRoom {
   suppliers Supplier[]
   supplyItems SupplyItem[]
   purchaseInvoices PurchaseInvoice[]
+  appointments Appointment[]
   @@unique([clinicId, name])
+}
+
+model Appointment {
+  id String @id @default(uuid()) @db.Uuid
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  patientId Int?
+  patient Patient? @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  dentistId String
+  dentist User @relation("AppointmentDentist", fields: [dentistId], references: [id], onDelete: Restrict)
+  kind String @default("appointment") @db.VarChar(16)
+  date DateTime @db.Date
+  startMinutes Int
+  durationMinutes Int
+  status String @default("scheduled") @db.VarChar(20)
+  visitReason String @default("") @db.VarChar(500)
+  notes String @default("") @db.VarChar(4000)
+  createdById String
+  createdBy User @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  events AppointmentEvent[]
+  @@index([roomId, date, startMinutes])
+  @@index([roomId, dentistId, date, startMinutes])
+  @@index([patientId, date])
+}
+
+model AppointmentEvent {
+  id String @id @default(uuid()) @db.Uuid
+  appointmentId String @db.Uuid
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  action String @db.VarChar(24)
+  data Json
+  actorId String
+  actor User @relation("AppointmentEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  @@index([appointmentId, createdAt])
 }
 
 model Supplier {
@@ -225,6 +268,7 @@ model BillCategory {
   description String @default("") @db.VarChar(2000)
   defaultAmount Decimal? @db.Decimal(18, 2)
   currency Currency @default(USD)
+  laboratoryBills Boolean @default(false)
   active Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,6 +284,9 @@ model BillExpense {
   categoryId Int
   category BillCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   categoryName String @db.VarChar(150)
+  laboratoryId Int?
+  laboratory Laboratory? @relation(fields: [laboratoryId], references: [id], onDelete: Restrict)
+  laboratoryName String? @db.VarChar(150)
   amount Decimal @db.Decimal(18, 2)
   currency Currency
   baseCurrency Currency
@@ -254,6 +301,7 @@ model BillExpense {
   updatedAt DateTime @updatedAt
   @@index([roomId, date])
   @@index([roomId, categoryId, date])
+  @@index([roomId, laboratoryId, date])
 }
 model RoomAssignment {
   userId String
@@ -314,6 +362,7 @@ model Laboratory {
   active Boolean @default(true)
   treatments Treatment[]
   procedureRates LaboratoryProcedureRate[]
+  billExpenses BillExpense[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@unique([roomId, name])

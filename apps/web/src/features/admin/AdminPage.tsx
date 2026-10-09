@@ -22,6 +22,7 @@ type PermissionTreeRow =
 
 const permissionTreeRows: PermissionTreeRow[] = [
   { kind: "screen", screen: "dashboard", depth: 0 },
+  { kind: "screen", screen: "appointments", depth: 0 },
   { kind: "group", label: "clinical", depth: 0 },
   { kind: "screen", screen: "patients", depth: 1 },
   { kind: "screen", screen: "treatment", depth: 1 },

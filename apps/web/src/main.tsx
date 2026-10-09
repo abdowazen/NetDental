@@ -41,8 +41,15 @@ import { SupplierSearchPage } from "./features/inventory/SupplierSearchPage";
 import { SupplierFormPage } from "./features/inventory/SupplierFormPage";
 import { PurchaseInvoiceSearchPage } from "./features/inventory/PurchaseInvoiceSearchPage";
 import { PurchaseInvoiceFormPage } from "./features/inventory/PurchaseInvoiceFormPage";
+import { AppointmentsPage } from "./features/appointments/AppointmentsPage";
 import { applyAppearance, readAppearance } from "./lib/appearance";
 applyAppearance(readAppearance());
+document.addEventListener("wheel", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.type === "number" && document.activeElement === target) {
+    target.blur();
+  }
+}, { capture: true });
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
@@ -73,6 +80,9 @@ createRoot(document.getElementById("root")!).render(
                   <Route element={<ProtectedRoute screen="dashboard" scoped />}>
                     <Route path="/dashboard" element={<DynamicDashboardPage />} />
                     <Route path="/reports/clinical" element={<ClinicalAnalyticsPage />} />
+                  </Route>
+                  <Route element={<ProtectedRoute screen="appointments" scoped />}>
+                    <Route path="/appointments" element={<AppointmentsPage />} />
                   </Route>
                   <Route element={<ProtectedRoute screen="settings" scoped />}>
                     <Route path="/settings" element={<Navigate to="/settings/general" replace />} />

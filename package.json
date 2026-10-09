@@ -22,6 +22,7 @@
     "db:migrate": "prisma migrate deploy --schema apps/api/prisma/schema.prisma",
     "dentist:create": "tsx apps/api/src/create-dentist.ts",
     "admin:create": "tsx apps/api/src/create-admin.ts",
+    "data:reset": "tsx apps/api/src/reset-data.ts",
     "api:start": "node apps/api/dist/server.js",
     "desktop:start": "node scripts/dev.mjs",
     "desktop:package": "npm run build && node scripts/stage.mjs && electron-builder --config electron-builder.yml --win nsis",
@@ -30,6 +31,7 @@
     "test:desktop": "tsx tests/electron.smoke.ts",
     "test:patients": "tsx tests/patients.smoke.ts",
     "test:access": "tsx tests/access.smoke.ts",
+    "test:appearance": "npm run build -w @clinic/web && tsx tests/appearance.smoke.ts",
     "format": "prettier --write . --ignore-path .gitignore"
   },
   "devDependencies": {

@@ -8,6 +8,7 @@ function publicCategory(row: Row): BillCategory {
     description: row.description,
     defaultAmount: row.defaultAmount?.toFixed(2) ?? null,
     currency: row.currency,
+    laboratoryBills: row.laboratoryBills,
     active: row.active,
   };
 }
@@ -31,7 +32,8 @@ export function billCategoryStore(db: PrismaClient): BillCategoryStore {
   }
   const data = (input: BillCategoryInput) => ({
     name: input.name, description: input.description,
-    defaultAmount: input.defaultAmount || null, currency: input.currency, active: input.active,
+    defaultAmount: input.defaultAmount || null, currency: input.currency,
+    laboratoryBills: input.laboratoryBills, active: input.active,
   });
   return {
     async searchBillCategories({ q, page, pageSize, sort, direction }, roomId) {

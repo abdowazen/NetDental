@@ -10,6 +10,8 @@ import { ZodError } from "zod";
 import {
   loginSchema,
   allowed,
+  canUseDefaultPage,
+  defaultPageSchema,
   managedUserSchema,
   locationNameSchema,
   type Screen,
@@ -55,6 +57,9 @@ import {
   systemLogQuerySchema,
   systemLogClearSchema,
   systemLogIdSchema,
+  appointmentInputSchema,
+  appointmentQuerySchema,
+  appointmentStatusInputSchema,
 } from "@clinic/shared";
 import type { User as DbUser } from "@prisma/client";
 import type { Config } from "./config.js";
@@ -66,6 +71,7 @@ import { registerLaboratory } from "./laboratory-routes.js";
 import { registerPatientFiles } from "./patient-file-routes.js";
 import { resolve } from "node:path";
 import { DatabaseBackupError, registerDatabaseBackup } from "./database-backup.js";
+import { AppointmentOverlapError } from "./appointments.js";
 
 export const passwordOptions = {
   type: argon2id,
@@ -104,6 +110,7 @@ export const publicUser = (u: DbUser): User => ({
   displayName: u.displayName,
   role: u.role,
   preferredLanguage: u.preferredLanguage,
+  defaultPage: defaultPageSchema.parse(u.defaultPage),
   createdAt: u.createdAt.toISOString(),
 });
 class ApiError extends Error {
@@ -185,6 +192,8 @@ export async function buildApp(store: Store, config: Config) {
       return reply
         .status(error.statusCode)
         .send({ error: { code: error.code } });
+    if (error instanceof AppointmentOverlapError)
+      return reply.status(409).send({ error: { code: "CONFLICT" } });
     if (error instanceof DatabaseBackupError && ["BACKUP_BUSY", "INVALID_BACKUP_FILE"].includes(error.code))
       return reply.status(error.code === "BACKUP_BUSY" ? 409 : 400).send({ error: { code: error.code } });
     const accessError = databaseAccessError(error);
@@ -433,10 +442,18 @@ export async function buildApp(store: Store, config: Config) {
   });
   app.patch("/users/me/preferences", async (req) => {
     const user = await authenticated(req);
-    const { preferredLanguage } = preferencesSchema.parse(req.body);
+    const preferences = preferencesSchema.parse(req.body);
+    if (
+      preferences.defaultPage &&
+      !canUseDefaultPage(
+        await userWithAccess(user),
+        preferences.defaultPage,
+      )
+    )
+      throw new ApiError("FORBIDDEN", 403);
     return {
       user: await userWithAccess(
-        await store.updateLanguage(user.id, preferredLanguage),
+        await store.updatePreferences(user.id, preferences),
       ),
     };
   });
@@ -460,6 +477,44 @@ export async function buildApp(store: Store, config: Config) {
     const roomId = await scoped(req, "dashboard", "view");
     return store.getDashboard(roomId, dashboardQuerySchema.parse(req.query));
   });
+  app.get("/api/appointments", async (req) => {
+    const roomId = await scoped(req, "appointments", "view");
+    return store.getAppointments(roomId, appointmentQuerySchema.parse(req.query));
+  });
+  app.get("/api/appointments/patients", async (req) => {
+    const roomId = await scoped(req, "appointments", "view");
+    return store.searchPatients(patientSearchSchema.parse(req.query), roomId);
+  });
+  app.get<{ Params: { id: string } }>("/api/appointments/:id", async (req) => {
+    const roomId = await scoped(req, "appointments", "view");
+    const appointment = await store.findAppointment(req.params.id, roomId);
+    if (!appointment) throw new ApiError("NOT_FOUND", 404);
+    return { appointment };
+  });
+  app.post("/api/appointments", async (req, reply) => {
+    const roomId = await scoped(req, "appointments", "create");
+    const actor = await authenticated(req);
+    return reply.status(201).send({ appointment: await store.createAppointment(appointmentInputSchema.parse(req.body), roomId, actor.id) });
+  });
+  app.put<{ Params: { id: string } }>("/api/appointments/:id", async (req) => {
+    const roomId = await scoped(req, "appointments", "modify");
+    const actor = await authenticated(req);
+    const appointment = await store.updateAppointment(req.params.id, appointmentInputSchema.parse(req.body), roomId, actor.id);
+    if (!appointment) throw new ApiError("NOT_FOUND", 404);
+    return { appointment };
+  });
+  app.patch<{ Params: { id: string } }>("/api/appointments/:id/status", async (req) => {
+    const roomId = await scoped(req, "appointments", "modify");
+    const actor = await authenticated(req);
+    const appointment = await store.setAppointmentStatus(req.params.id, appointmentStatusInputSchema.parse(req.body).status, roomId, actor.id);
+    if (!appointment) throw new ApiError("NOT_FOUND", 404);
+    return { appointment };
+  });
+  app.delete<{ Params: { id: string } }>("/api/appointments/:id", async (req, reply) => {
+    const roomId = await scoped(req, "appointments", "delete");
+    if (!await store.deleteAppointment(req.params.id, roomId)) throw new ApiError("NOT_FOUND", 404);
+    return reply.status(204).send();
+  });
   app.get("/api/reports/new-patients", async (req) => {
     const roomId = await scoped(req, "reportNewPatients", "view");
     return store.getNewPatientsReport(newPatientReportQuerySchema.parse(req.query), roomId);
@@ -467,6 +522,10 @@ export async function buildApp(store: Store, config: Config) {
   app.get("/api/reports/lab-statement", async (req) => {
     const roomId = await scoped(req, "reportLabStatement", "view");
     return store.getLabStatement(labStatementQuerySchema.parse(req.query), roomId);
+  });
+  app.get("/api/reports/lab-statement-laboratories", async (req) => {
+    const roomId = await scoped(req, "reportLabStatement", "view");
+    return store.searchLaboratories(laboratoryCatalogSearchSchema.parse(req.query), roomId);
   });
   app.get("/api/reports/patients-statement", async (req) => {
     const roomId = await scoped(req, "reportPatientsStatement", "view");
@@ -580,6 +639,10 @@ export async function buildApp(store: Store, config: Config) {
   app.get("/api/bill-expenses", async (req) => {
     const roomId = await scoped(req, "billsPayments", "view");
     return store.searchBillExpenses(billExpenseSearchSchema.parse(req.query), roomId);
+  });
+  app.get("/api/bill-expense-laboratories", async (req) => {
+    const roomId = await scoped(req, "billsPayments", "view");
+    return store.searchLaboratories(laboratoryCatalogSearchSchema.parse(req.query), roomId);
   });
   app.get<{ Params: { id: string } }>("/api/bill-expenses/:id", async (req) => {
     const roomId = await scoped(req, "billsPayments", "view");
@@ -823,7 +886,7 @@ export async function buildApp(store: Store, config: Config) {
     app.setNotFoundHandler((req, reply) => {
       if (
         req.method === "GET" &&
-        (["/", "/login", "/dashboard", "/settings", "/settings/general", "/settings/currency", "/settings/backup", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/lab-statement", "/reports/billing-payments", "/reports/inventory", "/treatment"].includes(
+        (["/", "/login", "/dashboard", "/appointments", "/settings", "/settings/general", "/settings/currency", "/settings/backup", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/lab-statement", "/reports/billing-payments", "/reports/inventory", "/treatment"].includes(
           req.url.split("?")[0],
         ) ||
           /^\/(?:patients|procedures)(?:\/(?:new|\d+))?$/.test(req.url.split("?")[0]) ||

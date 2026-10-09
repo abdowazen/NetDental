@@ -5,6 +5,7 @@ export default {
       colors: {
         canvas: "rgb(var(--canvas) / <alpha-value>)",
         surface: "rgb(var(--surface) / <alpha-value>)",
+        input: "rgb(var(--input-bg) / <alpha-value>)",
         ink: "rgb(var(--ink) / <alpha-value>)",
         muted: "rgb(var(--muted) / <alpha-value>)",
         subtle: "rgb(var(--subtle) / <alpha-value>)",

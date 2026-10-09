@@ -26,10 +26,23 @@ export function billExpenseStore(db: PrismaClient): BillExpenseStore {
     const row = await db.billCategory.findFirst({ where: { id: categoryId, roomId, ...(requireActive ? { active: true } : {}) } });
     if (!row) throw new AccessError("NOT_FOUND"); return row;
   }
-  async function values(input: BillExpenseInput, roomId: number, requireActiveCategory: boolean) {
-    const [selectedCategory, base, effectiveRate] = await Promise.all([category(input.categoryId, roomId, requireActiveCategory), baseCurrency(roomId), rate(roomId, input.date)]);
+  async function laboratory(laboratoryId: number | undefined, roomId: number, requireActive: boolean) {
+    if (!laboratoryId) return null;
+    const row = await db.laboratory.findFirst({ where: { id: laboratoryId, roomId, ...(requireActive ? { active: true } : {}) }, select: { id: true, name: true } });
+    if (!row) throw new AccessError("NOT_FOUND"); return row;
+  }
+  async function values(input: BillExpenseInput, roomId: number, requireActiveCategory: boolean, requireActiveLaboratory: boolean) {
+    const [selectedCategory, selectedLaboratory, base, effectiveRate] = await Promise.all([
+      category(input.categoryId, roomId, requireActiveCategory),
+      laboratory(input.laboratoryId, roomId, requireActiveLaboratory),
+      baseCurrency(roomId),
+      rate(roomId, input.date),
+    ]);
+    if (selectedCategory.laboratoryBills !== Boolean(selectedLaboratory)) {
+      throw new AccessError("VALIDATION_ERROR");
+    }
     if (input.currency !== base && !effectiveRate) throw new AccessError("VALIDATION_ERROR");
-    return { selectedCategory, base, effectiveRate, baseAmount: convertCurrency(input.amount, input.currency, base, effectiveRate) };
+    return { selectedCategory, selectedLaboratory, base, effectiveRate, baseAmount: convertCurrency(input.amount, input.currency, base, effectiveRate) };
   }
   async function publicExpense(row: Row, currentBase?: Currency): Promise<BillExpense> {
     const base = currentBase ?? await baseCurrency(row.roomId); const originalCurrency = row.currency as Currency;
@@ -39,7 +52,9 @@ export function billExpenseStore(db: PrismaClient): BillExpenseStore {
       if (originalCurrency !== base && !snapshot) throw new AccessError("VALIDATION_ERROR");
       converted = convertCurrency(row.amount.toFixed(2), originalCurrency, base, snapshot);
     }
-    return { id: row.id, categoryId: row.categoryId, categoryName: row.categoryName, amount: row.amount.toFixed(2), currency: originalCurrency,
+    return { id: row.id, categoryId: row.categoryId, categoryName: row.categoryName,
+      laboratoryId: row.laboratoryId ?? undefined, laboratoryName: row.laboratoryName,
+      amount: row.amount.toFixed(2), currency: originalCurrency,
       baseCurrency: base, baseAmount: converted, lbpPerUsd: row.lbpPerUsd?.toFixed() ?? null, method: row.method as BillExpense["method"],
       date: day(row.date), note: row.note, actorId: row.actorId, createdAt: row.createdAt.toISOString() };
   }
@@ -49,12 +64,12 @@ export function billExpenseStore(db: PrismaClient): BillExpenseStore {
       const where: Prisma.BillExpenseWhereInput = { roomId,
         ...(input.categoryId ? { categoryId: input.categoryId } : {}),
         ...(input.from || input.to ? { date: { ...(input.from ? { gte: new Date(`${input.from}T00:00:00Z`) } : {}), ...(input.to ? { lte: new Date(`${input.to}T00:00:00Z`) } : {}) } } : {}),
-        ...(input.q ? { OR: [{ categoryName: { contains: text, mode: "insensitive" } }, { note: { contains: text, mode: "insensitive" } }] } : {}),
+        ...(input.q ? { OR: [{ categoryName: { contains: text, mode: "insensitive" } }, { laboratoryName: { contains: text, mode: "insensitive" } }, { note: { contains: text, mode: "insensitive" } }] } : {}),
       };
       const [total, rows, amountRows, base] = await Promise.all([
         db.billExpense.count({ where }),
         db.billExpense.findMany({ where, orderBy: [{ [input.sort]: input.direction }, { createdAt: input.direction }], skip: (input.page - 1) * input.pageSize, take: input.pageSize }),
-        db.billExpense.findMany({ where, select: { id: true, roomId: true, categoryId: true, categoryName: true, amount: true, currency: true, baseCurrency: true, baseAmount: true, lbpPerUsd: true, method: true, date: true, note: true, actorId: true, createdAt: true, updatedAt: true } }),
+        db.billExpense.findMany({ where, select: { id: true, roomId: true, categoryId: true, categoryName: true, laboratoryId: true, laboratoryName: true, amount: true, currency: true, baseCurrency: true, baseAmount: true, lbpPerUsd: true, method: true, date: true, note: true, actorId: true, createdAt: true, updatedAt: true } }),
         baseCurrency(roomId),
       ]);
       const [expenses, totals] = await Promise.all([Promise.all(rows.map((row) => publicExpense(row, base))), Promise.all(amountRows.map((row) => publicExpense(row, base)))]);
@@ -64,15 +79,15 @@ export function billExpenseStore(db: PrismaClient): BillExpenseStore {
       const row = await db.billExpense.findFirst({ where: { id, roomId } }); return row ? publicExpense(row) : null;
     },
     async createBillExpense(input, roomId, actorId) {
-      const { selectedCategory, base, effectiveRate, baseAmount } = await values(input, roomId, true);
-      return publicExpense(await db.billExpense.create({ data: { ...input, roomId, actorId, categoryName: selectedCategory.name,
+      const { selectedCategory, selectedLaboratory, base, effectiveRate, baseAmount } = await values(input, roomId, true, true);
+      return publicExpense(await db.billExpense.create({ data: { ...input, laboratoryId: selectedLaboratory?.id ?? null, laboratoryName: selectedLaboratory?.name ?? null, roomId, actorId, categoryName: selectedCategory.name,
         amount: new Prisma.Decimal(input.amount), baseCurrency: base, baseAmount: new Prisma.Decimal(baseAmount),
         lbpPerUsd: effectiveRate ? new Prisma.Decimal(effectiveRate.lbpPerUsd) : null, date: new Date(`${input.date}T00:00:00Z`) } }), base);
     },
     async updateBillExpense(id, input, roomId) {
       const existing = await db.billExpense.findFirst({ where: { id, roomId } }); if (!existing) return null;
-      const { selectedCategory, base, effectiveRate, baseAmount } = await values(input, roomId, input.categoryId !== existing.categoryId);
-      return publicExpense(await db.billExpense.update({ where: { id, roomId }, data: { ...input, categoryName: selectedCategory.name,
+      const { selectedCategory, selectedLaboratory, base, effectiveRate, baseAmount } = await values(input, roomId, input.categoryId !== existing.categoryId, input.laboratoryId !== (existing.laboratoryId ?? undefined));
+      return publicExpense(await db.billExpense.update({ where: { id, roomId }, data: { ...input, laboratoryId: selectedLaboratory?.id ?? null, laboratoryName: selectedLaboratory?.name ?? null, categoryName: selectedCategory.name,
         amount: new Prisma.Decimal(input.amount), baseCurrency: base, baseAmount: new Prisma.Decimal(baseAmount),
         lbpPerUsd: effectiveRate ? new Prisma.Decimal(effectiveRate.lbpPerUsd) : null, date: new Date(`${input.date}T00:00:00Z`) } }), base);
     },

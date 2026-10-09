@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type KeyboardEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { CreditCard, Search, CalendarDays, Layers, FlaskConical, Images, History } from "lucide-react";
@@ -19,13 +19,15 @@ type Tab = typeof tabs[number];
 const tabIcons = { plan: Layers, session: CalendarDays, payments: CreditCard, laboratory: FlaskConical, files: Images, history: History };
 
 export function TreatmentWorkspacePage() {
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation();
   const { user } = useAuth();
   const { roomId } = useWorkspace();
-  const [tab, setTab] = useState<Tab>("plan");
+  const requestedTab = searchParams.get("tab");
+  const [tab, setTab] = useState<Tab>(tabs.includes(requestedTab as Tab) ? requestedTab as Tab : "plan");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
-  const [patientId, setPatientId] = useState("");
+  const [patientId, setPatientId] = useState(searchParams.get("patientId") ?? "");
   const [patientOpen, setPatientOpen] = useState(false);
   const [activeOption, setActiveOption] = useState(-1);
   const canReadPatients = allowed(user, "patients");

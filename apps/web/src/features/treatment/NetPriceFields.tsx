@@ -10,7 +10,7 @@ export function NetPriceFields({ id, base, value, onChange, disabled }: {
   const net = valid ? moneyCents(value) : base;
   const discount = base - net;
   const percent = base ? moneyString((discount * 10000n + base / 2n) / base) : "0.00";
-  return <fieldset disabled={disabled} className="grid grid-cols-3 gap-2">
+  return <fieldset disabled={disabled} className="treatment-total-fields grid grid-cols-3 gap-2">
     <p className="col-span-3 text-xs">{t("discountBase")}: <strong>{moneyString(base)} USD</strong></p>
     <Field id={id + "-net-price"} label={t("twNetPrice")}>
       <input id={id + "-net-price"} className="input" type="number" min="0" max={moneyString(base)} step="0.01" required

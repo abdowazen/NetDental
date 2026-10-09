@@ -4,23 +4,24 @@
 @layer base {
   :root {
     color-scheme: light;
-    --canvas: 246 248 248;
+    --canvas: 248 250 252;
     --surface: 255 255 255;
-    --ink: 30 41 59;
-    --muted: 100 116 139;
+    --input-bg: 255 255 255;
+    --ink: 15 23 42;
+    --muted: 71 85 105;
     --subtle: 100 116 139;
-    --line: 203 213 225;
+    --line: 226 232 240;
     --soft: 248 250 252;
-    --accent-solid: 17 103 93;
-    --accent-hover: 23 85 78;
-    --accent-brand: 18 62 57;
-    --accent-pale: 213 239 234;
-    --accent-light: 17 103 93;
+    --accent-solid: 15 118 110;
+    --accent-hover: 17 94 89;
+    --accent-brand: 17 94 89;
+    --accent-pale: 204 251 241;
+    --accent-light: 15 118 110;
     --accent-bright: 94 234 212;
-    --accent-tint: 239 250 248;
-    --accent-border: 213 239 234;
-    --accent-shade: 22 53 50;
-    --accent-dark-border: 43 88 80;
+    --accent-tint: 204 251 241;
+    --accent-border: 94 234 212;
+    --accent-shade: 19 78 74;
+    --accent-dark-border: 15 118 110;
     --logo-start: 6 45 98;
     --logo-end: 13 173 181;
     --logo-brand-start: 236 254 255;
@@ -29,85 +30,85 @@
     --danger-soft: 254 242 242;
     --danger-line: 254 202 202;
   }
-  :root[data-color="blue"] {
-    --accent-solid: 29 78 216;
-    --accent-hover: 30 64 175;
-    --accent-brand: 23 37 84;
+  :root[data-color="dental-blue"] {
+    --accent-solid: 37 99 235;
+    --accent-hover: 29 78 216;
+    --accent-brand: 29 78 216;
     --accent-pale: 219 234 254;
-    --accent-light: 29 78 216;
+    --accent-light: 37 99 235;
     --accent-bright: 147 197 253;
-    --accent-tint: 239 246 255;
-    --accent-border: 191 219 254;
-    --accent-shade: 25 43 73;
-    --accent-dark-border: 48 76 115;
+    --accent-tint: 219 234 254;
+    --accent-border: 147 197 253;
+    --accent-shade: 23 37 84;
+    --accent-dark-border: 29 78 216;
     --logo-start: 15 42 95;
     --logo-end: 8 145 178;
     --logo-brand-start: 239 246 255;
     --logo-brand-end: 94 234 212;
   }
-  :root[data-color="orange"] {
-    --accent-solid: 194 65 12;
-    --accent-hover: 154 52 18;
-    --accent-brand: 67 30 16;
-    --accent-pale: 255 237 213;
-    --accent-light: 194 65 12;
-    --accent-bright: 253 186 116;
-    --accent-tint: 255 247 237;
-    --accent-border: 254 215 170;
-    --accent-shade: 60 39 26;
-    --accent-dark-border: 111 69 39;
+  :root[data-color="warm-amber"] {
+    --accent-solid: 180 83 9;
+    --accent-hover: 146 64 14;
+    --accent-brand: 146 64 14;
+    --accent-pale: 254 243 199;
+    --accent-light: 180 83 9;
+    --accent-bright: 252 211 77;
+    --accent-tint: 254 243 199;
+    --accent-border: 252 211 77;
+    --accent-shade: 69 26 3;
+    --accent-dark-border: 180 83 9;
     --logo-start: 124 45 18;
     --logo-end: 234 179 8;
     --logo-brand-start: 255 247 237;
     --logo-brand-end: 253 224 71;
   }
-  :root[data-color="aqua-blue"] {
-    --accent-solid: 54 181 197;
-    --accent-hover: 46 163 179;
-    --accent-brand: 20 79 88;
-    --accent-pale: 211 245 248;
-    --accent-light: 22 112 125;
-    --accent-bright: 115 219 231;
-    --accent-tint: 236 250 252;
-    --accent-border: 170 229 236;
-    --accent-shade: 21 48 54;
-    --accent-dark-border: 43 87 96;
+  :root[data-color="soft-violet"] {
+    --accent-solid: 124 58 237;
+    --accent-hover: 109 40 217;
+    --accent-brand: 109 40 217;
+    --accent-pale: 237 233 254;
+    --accent-light: 124 58 237;
+    --accent-bright: 196 181 253;
+    --accent-tint: 237 233 254;
+    --accent-border: 196 181 253;
+    --accent-shade: 46 16 101;
+    --accent-dark-border: 109 40 217;
+    --logo-start: 76 29 149;
+    --logo-end: 219 39 119;
+    --logo-brand-start: 250 245 255;
+    --logo-brand-end: 249 168 212;
+  }
+  :root[data-color="ocean-cyan"] {
+    --accent-solid: 14 116 144;
+    --accent-hover: 21 94 117;
+    --accent-brand: 21 94 117;
+    --accent-pale: 207 250 254;
+    --accent-light: 14 116 144;
+    --accent-bright: 103 232 249;
+    --accent-tint: 207 250 254;
+    --accent-border: 103 232 249;
+    --accent-shade: 8 51 68;
+    --accent-dark-border: 14 116 144;
     --logo-start: 8 47 73;
     --logo-end: 13 148 136;
     --logo-brand-start: 236 254 255;
     --logo-brand-end: 165 243 252;
   }
-  :root[data-color="aqua-green"] {
+  :root[data-color="fresh-emerald"] {
     --accent-solid: 4 120 87;
     --accent-hover: 6 95 70;
-    --accent-brand: 6 55 43;
+    --accent-brand: 6 95 70;
     --accent-pale: 209 250 229;
     --accent-light: 4 120 87;
     --accent-bright: 110 231 183;
-    --accent-tint: 236 253 245;
-    --accent-border: 167 243 208;
-    --accent-shade: 17 49 40;
-    --accent-dark-border: 31 88 65;
+    --accent-tint: 209 250 229;
+    --accent-border: 110 231 183;
+    --accent-shade: 2 44 34;
+    --accent-dark-border: 4 120 87;
     --logo-start: 5 78 65;
     --logo-end: 8 145 178;
     --logo-brand-start: 236 253 245;
     --logo-brand-end: 103 232 249;
-  }
-  :root[data-color="purple"] {
-    --accent-solid: 126 34 206;
-    --accent-hover: 107 33 168;
-    --accent-brand: 48 24 70;
-    --accent-pale: 243 232 255;
-    --accent-light: 126 34 206;
-    --accent-bright: 216 180 254;
-    --accent-tint: 250 245 255;
-    --accent-border: 233 213 255;
-    --accent-shade: 47 33 65;
-    --accent-dark-border: 88 59 116;
-    --logo-start: 76 29 149;
-    --logo-end: 219 39 119;
-    --logo-brand-start: 250 245 255;
-    --logo-brand-end: 249 168 212;
   }
   :root {
     --accent-ink: var(--accent-light);
@@ -116,13 +117,16 @@
   }
   :root[data-mode="dark"] {
     color-scheme: dark;
-    --canvas: 15 23 34;
-    --surface: 23 33 47;
-    --ink: 241 245 249;
-    --muted: 173 188 206;
+    --canvas: 15 23 42;
+    --surface: 30 41 59;
+    --input-bg: 15 23 42;
+    --ink: 248 250 252;
+    --muted: 203 213 225;
     --subtle: 148 163 184;
-    --line: 64 80 101;
-    --soft: 31 44 61;
+    --line: 71 85 105;
+    --soft: 51 65 85;
+    --logo-start: 226 232 240;
+    --logo-end: var(--accent-bright);
     --accent-ink: var(--accent-bright);
     --accent-soft: var(--accent-shade);
     --accent-line: var(--accent-dark-border);
@@ -149,6 +153,24 @@
   button:disabled {
     @apply cursor-not-allowed;
   }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: rgb(var(--accent-solid));
+  }
+  input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+  [role="switch"][aria-checked="true"] {
+    border-color: rgb(var(--accent-solid));
+    background-color: rgb(var(--accent-solid));
+    color: #ffffff;
+  }
   dt {
     @apply text-xs font-medium text-muted;
   }
@@ -161,38 +183,41 @@
     outline-color: white;
   }
   .appearance-option {
-    @apply flex min-h-14 items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium transition-colors hover:bg-soft peer-checked:border-accent-ink peer-checked:bg-accent-soft peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-4 peer-focus-visible:outline-accent-ink;
+    @apply flex min-h-14 items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium transition-colors hover:bg-soft peer-checked:border-accent-solid peer-checked:bg-accent-soft peer-checked:ring-1 peer-checked:ring-accent-solid peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-4 peer-focus-visible:outline-accent-ink;
   }
   .theme-swatch {
-    @apply h-5 w-5 shrink-0 rounded-full;
+    @apply h-5 w-5 shrink-0 rounded-full border border-black/10 shadow-sm;
   }
-  .theme-swatch-default {
-    background: #11675d;
+  .theme-swatch-clinical-teal {
+    background: #0f766e;
   }
-  .theme-swatch-blue {
-    background: #1d4ed8;
+  .theme-swatch-dental-blue {
+    background: #2563eb;
   }
-  .theme-swatch-orange {
-    background: #c2410c;
+  .theme-swatch-warm-amber {
+    background: #b45309;
   }
-  .theme-swatch-purple {
-    background: #7e22ce;
+  .theme-swatch-soft-violet {
+    background: #7c3aed;
   }
-  .theme-swatch-aqua-blue {
-    background: #36b5c5;
+  .theme-swatch-ocean-cyan {
+    background: #0e7490;
   }
-  .theme-swatch-aqua-green {
+  .theme-swatch-fresh-emerald {
     background: #047857;
   }
   .button {
     @apply inline-flex min-h-12 items-center justify-center gap-3 rounded-lg bg-accent-solid px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-60;
   }
   .input {
-    @apply min-h-12 w-full rounded-lg border border-line bg-surface px-3.5 py-3 text-sm text-ink placeholder:text-subtle focus:border-accent-ink;
+    @apply min-h-12 w-full rounded-lg border border-line bg-input px-3.5 py-3 text-sm text-ink placeholder:text-subtle focus:border-accent-ink;
   }
   .patient-form .input,
   .patient-search-filters .input {
     @apply min-h-10 py-2;
+  }
+  .treatment-total-fields > div > label {
+    @apply flex min-h-10 items-end;
   }
   .card {
     @apply rounded-xl border border-line/80 bg-surface;
@@ -202,46 +227,86 @@
     @apply text-xs font-semibold tracking-[.16em] text-accent-ink;
   }
   .brand-logo-shell {
-    @apply flex w-full max-w-[172px] items-center justify-center;
+    @apply flex w-full max-w-[176px] items-center gap-2.5;
   }
   .brand-logo-shell-compact {
-    @apply h-8 w-8 shrink-0;
+    @apply h-9 w-9 shrink-0 justify-center;
   }
-  .brand-logo-graphic {
-    display: block;
-    background-image: linear-gradient(
-      115deg,
-      rgb(var(--logo-start)) 12%,
-      rgb(var(--logo-end)) 88%
-    );
+  .brand-mark {
+    @apply h-10 w-10 shrink-0 overflow-visible;
     transition:
       opacity 180ms ease,
-      transform 180ms ease;
+      transform 180ms ease,
+      filter 180ms ease;
   }
-  .brand-logo-full {
-    width: 100%;
-    aspect-ratio: 2155 / 730;
-    -webkit-mask: url("/assets/netdenty-logo.png") center / contain no-repeat;
-    mask: url("/assets/netdenty-logo.png") center / contain no-repeat;
+  .brand-logo-shell-compact .brand-mark {
+    @apply h-8 w-8;
   }
-  .brand-logo-mark {
-    width: 2rem;
-    height: 2rem;
-    -webkit-mask: url("/assets/netdenty-mark.png") center / contain no-repeat;
-    mask: url("/assets/netdenty-mark.png") center / contain no-repeat;
+  .brand-mark-start {
+    stop-color: rgb(var(--logo-start));
   }
-  .sidebar .brand-logo-graphic,
-  .login-brand .brand-logo-graphic {
-    background-image: linear-gradient(
-      115deg,
-      rgb(var(--logo-brand-start)) 12%,
-      rgb(var(--logo-brand-end)) 88%
-    );
+  .brand-mark-end {
+    stop-color: rgb(var(--logo-end));
   }
-  .brand-logo-shell:hover .brand-logo-graphic,
-  .brand-home-link:focus-visible .brand-logo-graphic {
-    opacity: 0.88;
-    transform: scale(1.015);
+  .brand-mark-outline,
+  .brand-mark-wave {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .brand-mark-outline {
+    stroke-width: 4;
+  }
+  .brand-mark-wave {
+    stroke-width: 3.25;
+  }
+  .brand-wordmark {
+    @apply flex min-w-0 flex-col leading-none;
+  }
+  .brand-wordmark-name {
+    @apply whitespace-nowrap text-[1.2rem] font-bold tracking-[-0.035em];
+  }
+  .brand-wordmark-net {
+    color: rgb(var(--ink));
+  }
+  .brand-wordmark-denty {
+    color: rgb(var(--logo-end));
+  }
+  .brand-wordmark-descriptor {
+    @apply mt-1 whitespace-nowrap text-[0.52rem] font-semibold uppercase tracking-[0.19em];
+    color: rgb(var(--muted));
+  }
+  .sidebar .brand-mark-start,
+  .login-brand .brand-mark-start {
+    stop-color: rgb(var(--logo-brand-start));
+  }
+  .sidebar .brand-mark-end,
+  .login-brand .brand-mark-end {
+    stop-color: rgb(var(--logo-brand-end));
+  }
+  .sidebar .brand-wordmark-net,
+  .login-brand .brand-wordmark-net {
+    color: rgb(var(--logo-brand-start));
+  }
+  .sidebar .brand-wordmark-denty,
+  .login-brand .brand-wordmark-denty,
+  .sidebar .brand-wordmark-descriptor,
+  .login-brand .brand-wordmark-descriptor {
+    color: rgb(var(--logo-brand-end));
+  }
+  .login-brand .brand-logo-shell {
+    @apply max-w-[210px] gap-3;
+  }
+  .login-brand .brand-mark {
+    @apply h-12 w-12;
+  }
+  .login-brand .brand-wordmark-name {
+    @apply text-2xl;
+  }
+  .brand-logo-shell:hover .brand-mark,
+  .brand-home-link:focus-visible .brand-mark {
+    filter: drop-shadow(0 4px 8px rgb(var(--logo-end) / 20%));
+    transform: translateY(-1px);
   }
   .brand-home-link {
     @apply block w-full rounded-lg;
@@ -337,5 +402,5 @@
   }
 }
   .action-menu-row:has(button[aria-expanded="true"]) {
-    background-color: rgb(var(--accent-tint));
+    background-color: rgb(var(--accent-soft));
   }

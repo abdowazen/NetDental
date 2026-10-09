@@ -7,6 +7,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
+  UserRound,
   UsersRound,
   Settings,
   Stethoscope,
@@ -29,6 +30,7 @@ import {
   UserCog,
   Building2,
   ScrollText,
+  CalendarDays,
 } from "lucide-react";
 import { Brand } from "./ui";
 import { LanguageSelect } from "./LanguageSelect";
@@ -103,6 +105,11 @@ function Sidebar({
             >
               <LayoutDashboard size={20} />
               {!collapsed && t("dashboard")}
+            </NavLink>
+          )}
+          {allowed(user, "appointments") && (
+            <NavLink to="/appointments" title={collapsed ? t("appointments") : undefined} className={({isActive})=>`nav-item ${isActive?"active":""}`}>
+              <CalendarDays size={20}/>{!collapsed&&t("appointments")}
             </NavLink>
           )}
           <div
@@ -304,7 +311,7 @@ function Sidebar({
                   }
                 }}
               >
-                <Settings size={20} className="shrink-0" aria-hidden="true" />
+                <UserRound size={20} className="shrink-0" aria-hidden="true" />
                 {!collapsed && (
                   <>
                     <span>{t("administration")}</span>

@@ -1,6 +1,10 @@
 import { z } from "zod";
 export * from "./access.js";
-import type { Access } from "./access.js";
+import {
+  defaultPageSchema,
+  type Access,
+  type DefaultPage,
+} from "./access.js";
 export * from "./currency.js";
 export * from "./payments.js";
 export * from "./laboratory.js";
@@ -11,6 +15,7 @@ export * from "./inventory.js";
 export * from "./purchase-invoices.js";
 export * from "./patient-files.js";
 export * from "./dashboard.js";
+export * from "./appointments.js";
 export * from "./reports.js";
 export * from "./system-logs.js";
 export * from "./patients.js";
@@ -38,8 +43,12 @@ export const createDentistSchema = z
   })
   .strict();
 export const preferencesSchema = z
-  .object({ preferredLanguage: languageSchema })
-  .strict();
+  .object({
+    preferredLanguage: languageSchema.optional(),
+    defaultPage: defaultPageSchema.optional(),
+  })
+  .strict()
+  .refine((value) => value.preferredLanguage || value.defaultPage);
 export type User = {
   id: string;
   username: string;
@@ -47,6 +56,7 @@ export type User = {
   role: "DENTIST" | "ASSISTANT" | "RECEPTIONIST" | "ADMIN";
   access?: Access;
   preferredLanguage: Language;
+  defaultPage: DefaultPage;
   createdAt: string;
 };
 export type ErrorCode =

@@ -1,25 +1,40 @@
 import assert from "node:assert/strict";
 import type { FastifyInstance } from "fastify";
-import type { BillExpenseList } from "@clinic/shared";
+import { clinicDate, type BillExpenseList, type LabStatementReport, type LaboratoryCatalogList } from "@clinic/shared";
 
 export async function checkBillExpenses(app: FastifyInstance, headers: Record<string, string>, forbiddenHeaders: Record<string, string>, otherRoom: number) {
-  const categoryResponse = await app.inject({ method: "POST", url: "/api/bill-categories", headers, payload: { name: "Laboratory bills", description: "External laboratory expenses", defaultAmount: "900000", currency: "LBP", active: true } });
+  const categoryResponse = await app.inject({ method: "POST", url: "/api/bill-categories", headers, payload: { name: "Laboratory bills", description: "External laboratory expenses", defaultAmount: "900000", currency: "LBP", laboratoryBills: true, active: true } });
   assert.equal(categoryResponse.statusCode, 201, categoryResponse.body);
   const categoryId = categoryResponse.json().category.id;
-  const input = { categoryId, amount: "900000", currency: "LBP", method: "cheque", date: "2026-01-02", note: "January laboratory invoice" };
+  const laboratoriesResponse = await app.inject({ url: "/api/bill-expense-laboratories?pageSize=100&sort=name&direction=asc", headers });
+  assert.equal(laboratoriesResponse.statusCode, 200, laboratoriesResponse.body);
+  const laboratory = laboratoriesResponse.json<LaboratoryCatalogList>().laboratories.find((item) => item.name === "Cedar Lab");
+  assert.ok(laboratory, "Cedar Lab is available to Bills & Payments");
+  const input = { categoryId, laboratoryId: laboratory.id, amount: "900000", currency: "LBP", method: "cheque", date: "2026-01-02", note: "January laboratory invoice" };
+  const missingLaboratory = await app.inject({ method: "POST", url: "/api/bill-expenses", headers, payload: { ...input, laboratoryId: undefined } });
+  assert.equal(missingLaboratory.statusCode, 400, missingLaboratory.body);
   const created = await app.inject({ method: "POST", url: "/api/bill-expenses", headers, payload: input });
   assert.equal(created.statusCode, 201, created.body);
   const expense = created.json().expense;
   assert.equal(expense.baseCurrency, "USD"); assert.equal(expense.baseAmount, "10.00"); assert.equal(expense.lbpPerUsd, "90000");
+  assert.equal(expense.laboratoryId, laboratory.id); assert.equal(expense.laboratoryName, "Cedar Lab");
   const list = await app.inject({ url: `/api/bill-expenses?categoryId=${categoryId}&from=2026-01-01&to=2026-12-31&page=1&pageSize=30&sort=date&direction=desc`, headers });
   assert.equal(list.statusCode, 200, list.body);
   const ledger = list.json<BillExpenseList>(); assert.equal(ledger.total, 1); assert.equal(ledger.totalBaseAmount, "10.00");
+  const reportUrl = `/api/reports/lab-statement?laboratoryId=${laboratory.id}&from=2026-01-01&to=${clinicDate()}&status=all&page=1&pageSize=30&sort=requestDate&direction=desc`;
+  let statement = (await app.inject({ url: reportUrl, headers })).json<LabStatementReport>();
+  assert.equal(statement.paymentTotals.find((total) => total.currency === "LBP")?.amount, "900000.00");
   const updated = await app.inject({ method: "PUT", url: `/api/bill-expenses/${expense.id}`, headers, payload: { ...input, amount: "25", currency: "USD", method: "card" } });
   assert.equal(updated.statusCode, 200, updated.body); assert.equal(updated.json().expense.baseAmount, "25.00");
+  statement = (await app.inject({ url: reportUrl, headers })).json<LabStatementReport>();
+  assert.equal(statement.paymentTotals.find((total) => total.currency === "USD")?.amount, "25.00");
+  assert.equal(statement.balanceTotals.find((total) => total.currency === "USD")?.amount, "30.00");
   assert.equal((await app.inject({ url: "/api/bill-expenses", headers: forbiddenHeaders })).statusCode, 403);
   assert.equal((await app.inject({ method: "POST", url: "/api/bill-expenses", headers: forbiddenHeaders, payload: input })).statusCode, 403);
   assert.equal((await app.inject({ url: `/api/bill-expenses/${expense.id}`, headers: { ...headers, "x-clinic-room": String(otherRoom) } })).statusCode, 404);
   assert.equal((await app.inject({ method: "DELETE", url: `/api/bill-expenses/${expense.id}`, headers })).statusCode, 204);
   assert.equal((await app.inject({ url: `/api/bill-expenses/${expense.id}`, headers })).statusCode, 404);
-  console.log("Bill expense checks passed: currencies, conversion snapshot, payment methods, totals, CRUD, permissions and room isolation.");
+  statement = (await app.inject({ url: reportUrl, headers })).json<LabStatementReport>();
+  assert.equal(statement.paymentTotals.find((total) => total.currency === "USD")?.amount, "0.00");
+  console.log("Bill expense checks passed: laboratory statement reconciliation, currencies, conversion snapshot, payment methods, totals, CRUD, permissions and room isolation.");
 }

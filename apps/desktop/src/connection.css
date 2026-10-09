@@ -19,9 +19,9 @@ main {
 }
 .logo {
   display: block;
-  width: min(100%, 300px);
+  width: min(100%, 320px);
   height: auto;
-  margin: 0 auto 24px;
+  margin: 0 auto 28px;
 }
 h1 {
   font-size: 26px;

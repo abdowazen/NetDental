@@ -390,7 +390,7 @@ try {
   await checkPayments(app, db, patient.id, procedureHeaders, room.id, sh);
   await checkLaboratory(app, db, patient.id, procedureHeaders, room.id, sh);
   await checkPatientFiles(app, db, patient.id, procedureHeaders, room.id, sh);
-  await checkDashboard(app, procedureHeaders);
+  await checkDashboard(app, db, patient.id, procedureHeaders);
   await checkReports(app, procedureHeaders, sh, room.id);
   await checkBillCategories(app, procedureHeaders, sh, room.id);
   await checkBillExpenses(app, procedureHeaders, sh, room.id);

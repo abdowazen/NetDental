@@ -24,7 +24,7 @@ export function AppearanceSettings() {
       <p className="mt-2 text-sm text-muted">{t("appearanceDescription")}</p>
       <fieldset className="mt-7">
         <legend className="mb-3 text-sm font-medium">{t("themeColor")}</legend>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {themeColors.map((color) => (
             <label key={color} className="relative cursor-pointer">
               <input

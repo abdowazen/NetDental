@@ -4,6 +4,10 @@ import { currencySchema, rateDateSchema, type Currency } from "./currency.js";
 export const billPaymentMethods = ["cash", "card", "cheque"] as const;
 export const billExpenseSchema = z.object({
   categoryId: z.coerce.number().int().positive("fieldRequired"),
+  laboratoryId: z.preprocess(
+    (value) => value === "" || value === null ? undefined : value,
+    z.coerce.number().int().positive("billExpenseLaboratoryInvalid").optional(),
+  ),
   amount: z.string().trim().regex(/^\d{1,12}(\.\d{1,2})?$/, "billExpenseAmountInvalid").refine((value) => Number(value) > 0, "billExpenseAmountInvalid").transform((value) => {
     const [whole, fraction = ""] = value.split("."); return `${BigInt(whole)}.${fraction.padEnd(2, "0")}`;
   }),
@@ -15,6 +19,7 @@ export const billExpenseSchema = z.object({
 export type BillExpenseInput = z.infer<typeof billExpenseSchema>;
 export type BillExpense = BillExpenseInput & {
   id: string; categoryName: string; baseCurrency: Currency; baseAmount: string;
+  laboratoryId?: number; laboratoryName: string | null;
   lbpPerUsd: string | null; actorId: string; createdAt: string;
 };
 export const billExpenseSearchSchema = z.object({

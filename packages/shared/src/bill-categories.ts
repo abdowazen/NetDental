@@ -15,6 +15,7 @@ export const billCategorySchema = z.object({
   description: z.string().trim().max(2000, "fieldTooLong"),
   defaultAmount: optionalAmountSchema,
   currency: currencySchema,
+  laboratoryBills: z.boolean(),
   active: z.boolean(),
 }).strict();
 export type BillCategoryInput = z.infer<typeof billCategorySchema>;

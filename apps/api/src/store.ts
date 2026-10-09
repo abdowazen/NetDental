@@ -1,5 +1,10 @@
 import { PrismaClient, type User, type Session } from "@prisma/client";
-import type { Language, Currency, ExchangeRate } from "@clinic/shared";
+import type {
+  Language,
+  Currency,
+  DefaultPage,
+  ExchangeRate,
+} from "@clinic/shared";
 import { patientStore, type PatientStore } from "./patients.js";
 import { procedureStore, type ProcedureStore } from "./procedures.js";
 import { odontogramStore, type OdontogramStore } from "./odontogram.js";
@@ -15,13 +20,14 @@ import { billCategoryStore, type BillCategoryStore } from "./bill-categories.js"
 import { billExpenseStore, type BillExpenseStore } from "./bill-expenses.js";
 import { inventoryStore, type InventoryStore } from "./inventory.js";
 import { purchaseInvoiceStore, type PurchaseInvoiceStore } from "./purchase-invoices.js";
+import { appointmentStore, type AppointmentStore } from "./appointments.js";
 export type NewDentist = {
   username: string;
   passwordHash: string;
   displayName: string;
   preferredLanguage: Language;
 };
-export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore, PaymentStore, LaboratoryStore, LaboratoryCatalogStore, PatientFileStore, DashboardStore, ReportStore, SystemLogStore, BillCategoryStore, BillExpenseStore, InventoryStore, PurchaseInvoiceStore {
+export interface Store extends PatientStore, ProcedureStore, OdontogramStore, AccessStore, PaymentStore, LaboratoryStore, LaboratoryCatalogStore, PatientFileStore, DashboardStore, ReportStore, SystemLogStore, BillCategoryStore, BillExpenseStore, InventoryStore, PurchaseInvoiceStore, AppointmentStore {
   getBaseCurrency(roomId: number): Promise<Currency>;
   setBaseCurrency(currency: Currency, roomId: number): Promise<void>;
   listExchangeRates(year: string, roomId: number): Promise<ExchangeRate[]>;
@@ -41,7 +47,13 @@ export interface Store extends PatientStore, ProcedureStore, OdontogramStore, Ac
   findSession(tokenHash: string): Promise<(Session & { user: User }) | null>;
   deleteSession(tokenHash: string): Promise<void>;
   clearExpired(): Promise<void>;
-  updateLanguage(id: string, language: Language): Promise<User>;
+  updatePreferences(
+    id: string,
+    preferences: {
+      preferredLanguage?: Language;
+      defaultPage?: DefaultPage;
+    },
+  ): Promise<User>;
 }
 export function prismaStore(db: PrismaClient): Store {
   return {
@@ -60,6 +72,7 @@ export function prismaStore(db: PrismaClient): Store {
     ...billExpenseStore(db),
     ...inventoryStore(db),
     ...purchaseInvoiceStore(db),
+    ...appointmentStore(db),
     async getBaseCurrency(roomId) {
       return (
         (await db.currencySettings.findUnique({ where: { id: roomId } }))
@@ -122,7 +135,7 @@ export function prismaStore(db: PrismaClient): Store {
         where: { expiresAt: { lte: new Date() } },
       });
     },
-    updateLanguage: (id, preferredLanguage) =>
-      db.user.update({ where: { id }, data: { preferredLanguage } }),
+    updatePreferences: (id, preferences) =>
+      db.user.update({ where: { id }, data: preferences }),
   };
 }

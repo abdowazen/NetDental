@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const screens = [
   "dashboard",
+  "appointments",
   "patients",
   "treatment",
   "actsProcedures",
@@ -39,6 +40,67 @@ export type RoomAccess = {
   clinicName: string;
 };
 export type Access = { permissions: Permission[]; rooms: RoomAccess[] };
+export const defaultPages = [
+  "automatic",
+  "dashboard",
+  "appointments",
+  "patients",
+  "treatment",
+  "procedures",
+  "laboratories",
+  "clinicalAnalytics",
+  "newPatients",
+  "patientsStatement",
+  "labStatement",
+  "billingAnalytics",
+  "inventoryAnalytics",
+  "billsPayments",
+  "billCategories",
+  "purchaseInvoices",
+  "supplies",
+  "suppliers",
+  "generalSettings",
+  "currencySetup",
+  "backupRestore",
+  "help",
+  "adminUsers",
+  "adminLocations",
+  "adminLogs",
+] as const;
+export type DefaultPage = (typeof defaultPages)[number];
+export const defaultPageSchema = z.enum(defaultPages);
+export const defaultPageOptions: ReadonlyArray<{
+  value: Exclude<DefaultPage, "automatic">;
+  path: string;
+  label: string;
+  screen?: Screen;
+  administrator?: boolean;
+}> = [
+  { value: "dashboard", path: "/dashboard", label: "dashboard", screen: "dashboard" },
+  { value: "appointments", path: "/appointments", label: "appointments", screen: "appointments" },
+  { value: "patients", path: "/patients", label: "patients", screen: "patients" },
+  { value: "treatment", path: "/treatment", label: "treatment", screen: "treatment" },
+  { value: "procedures", path: "/procedures", label: "procedures", screen: "actsProcedures" },
+  { value: "laboratories", path: "/laboratories", label: "laboratoriesCatalog", screen: "laboratoriesCatalog" },
+  { value: "clinicalAnalytics", path: "/reports/clinical", label: "clinicalAnalytics", screen: "dashboard" },
+  { value: "newPatients", path: "/reports/new-patients", label: "reportNewPatients", screen: "reportNewPatients" },
+  { value: "patientsStatement", path: "/reports/patients-statement", label: "reportPatientsStatement", screen: "reportPatientsStatement" },
+  { value: "labStatement", path: "/reports/lab-statement", label: "reportLabStatement", screen: "reportLabStatement" },
+  { value: "billingAnalytics", path: "/reports/billing-payments", label: "billingAnalyticsReport", screen: "reportBillingPayments" },
+  { value: "inventoryAnalytics", path: "/reports/inventory", label: "inventoryAnalyticsReport", screen: "reportInventoryAnalytics" },
+  { value: "billsPayments", path: "/bills-payments", label: "billsPayments", screen: "billsPayments" },
+  { value: "billCategories", path: "/bill-categories", label: "billsCategories", screen: "billsCategories" },
+  { value: "purchaseInvoices", path: "/purchase-invoices", label: "purchaseInvoice", screen: "purchaseInvoice" },
+  { value: "supplies", path: "/supplies", label: "suppliesMaterials", screen: "suppliesMaterials" },
+  { value: "suppliers", path: "/suppliers", label: "suppliersVendors", screen: "suppliersVendors" },
+  { value: "generalSettings", path: "/settings/general", label: "generalSettings", screen: "settings" },
+  { value: "currencySetup", path: "/settings/currency", label: "currencySetup", screen: "currencySetup" },
+  { value: "backupRestore", path: "/settings/backup", label: "backupRestore", screen: "backupRestore" },
+  { value: "help", path: "/settings/help", label: "help", screen: "help" },
+  { value: "adminUsers", path: "/admin/users", label: "manageUsers", administrator: true },
+  { value: "adminLocations", path: "/admin/locations", label: "clinicsRooms", administrator: true },
+  { value: "adminLogs", path: "/admin/logs", label: "systemLogs", administrator: true },
+];
 export function allowed(
   user: { role: string; access?: Access } | null,
   screen: Screen,
@@ -51,10 +113,22 @@ export function allowed(
   );
   return Boolean(permission?.view && permission[action]);
 }
-export function landingPath(user: { role: string; access?: Access } | null) {
+export function canUseDefaultPage(
+  user: { role: string; access?: Access } | null,
+  page: DefaultPage,
+) {
+  if (page === "automatic") return true;
+  const option = defaultPageOptions.find((item) => item.value === page);
+  if (!option || !user) return false;
+  if (option.administrator) return user.role === "ADMIN";
+  return Boolean(option.screen && allowed(user, option.screen));
+}
+function automaticLandingPath(user: { role: string; access?: Access } | null) {
   if (user?.role === "ADMIN") return "/admin/users";
   return allowed(user, "dashboard")
     ? "/dashboard"
+    : allowed(user, "appointments")
+      ? "/appointments"
     : allowed(user, "patients")
       ? "/patients"
       : allowed(user, "treatment")
@@ -92,6 +166,14 @@ export function landingPath(user: { role: string; access?: Access } | null) {
       : allowed(user, "help")
         ? "/settings/help"
         : "/dashboard";
+}
+export function landingPath(
+  user: { role: string; access?: Access; defaultPage?: DefaultPage } | null,
+) {
+  const selected = user?.defaultPage ?? "automatic";
+  if (selected !== "automatic" && canUseDefaultPage(user, selected))
+    return defaultPageOptions.find((item) => item.value === selected)!.path;
+  return automaticLandingPath(user);
 }
 const permissionSchema = z
   .object({

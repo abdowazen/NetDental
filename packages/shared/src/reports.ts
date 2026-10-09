@@ -44,7 +44,13 @@ export type LabStatementRow = {
   procedureCode: string; procedureName: string; teeth: number[]; requestDate: string; dueDate: string | null;
   receivedDate: string | null; status: "to_request" | "requested" | "received" | "voided"; cost: string; currency: "USD" | "LBP";
 };
-export type LabStatementReport = { total: number; rows: LabStatementRow[]; payableTotals: { currency: "USD" | "LBP"; amount: string }[] };
+export type LabStatementReport = {
+  total: number;
+  rows: LabStatementRow[];
+  payableTotals: { currency: "USD" | "LBP"; amount: string }[];
+  paymentTotals: { currency: "USD" | "LBP"; amount: string }[];
+  balanceTotals: { currency: "USD" | "LBP"; amount: string }[];
+};
 
 export const patientStatementQuerySchema = z.object({
   patientId: z.coerce.number().int().positive().optional(),

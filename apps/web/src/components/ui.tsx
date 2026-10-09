@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useId,
   type InputHTMLAttributes,
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -8,15 +9,44 @@ import { useTranslation } from "react-i18next";
 import { WifiOff, LoaderCircle } from "lucide-react";
 export function Brand({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation();
+  const gradientId = useId().replaceAll(":", "");
   return (
     <div
       className={`brand-logo-shell ${compact ? "brand-logo-shell-compact" : ""}`}
+      role="img"
+      aria-label={t("appName")}
     >
-      <span
-        className={`brand-logo-graphic ${compact ? "brand-logo-mark" : "brand-logo-full"}`}
-        role="img"
-        aria-label={t("appName")}
-      />
+      <svg
+        className="brand-mark"
+        viewBox="0 0 64 64"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+            <stop className="brand-mark-start" />
+            <stop offset="1" className="brand-mark-end" />
+          </linearGradient>
+        </defs>
+        <path
+          className="brand-mark-outline"
+          stroke={`url(#${gradientId})`}
+          d="M18 7.5c5.6 0 8.6 3.1 14 3.1s8.4-3.1 14-3.1c8.1 0 13.1 6.5 11.6 15.7-.9 5.5-4.3 11.1-6 17-2.2 7.8-3.4 16.3-8.4 16.3-4.4 0-5.6-7.5-7.5-13.2-1.1-3.4-2-5.5-3.7-5.5s-2.6 2.1-3.7 5.5c-1.9 5.7-3.1 13.2-7.5 13.2-5 0-6.2-8.5-8.4-16.3-1.7-5.9-5.1-11.5-6-17C4.9 14 9.9 7.5 18 7.5Z"
+        />
+        <path
+          className="brand-mark-wave"
+          stroke={`url(#${gradientId})`}
+          d="M13 25c5.2-4.5 9.7-4.5 15 0s9.8 4.5 15 0 7.2-4.2 9-3"
+        />
+      </svg>
+      {!compact && (
+        <span className="brand-wordmark" aria-hidden="true">
+          <span className="brand-wordmark-name">
+            <span className="brand-wordmark-net">Net</span>
+            <span className="brand-wordmark-denty">Denty</span>
+          </span>
+          <span className="brand-wordmark-descriptor">{t("brandDescriptor")}</span>
+        </span>
+      )}
     </div>
   );
 }
