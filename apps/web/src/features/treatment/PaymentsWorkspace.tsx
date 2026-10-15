@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { CreditCard, ReceiptText, Scale } from "lucide-react";
-import { allowed, clinicDate, paymentInputSchema, type Currency, type PaymentInput, type PaymentSummary } from "@clinic/shared";
+import { CreditCard, Pencil, ReceiptText, Scale, Trash2 } from "lucide-react";
+import { allowed, clinicDate, paymentInputSchema, type Currency, type Payment, type PaymentInput, type PaymentSummary } from "@clinic/shared";
 import { api, errorKey } from "../../lib/api";
 import { Pagination } from "../../components/Pagination";
 import { Button, ErrorMessage, Field } from "../../components/ui";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { useAuth } from "../auth/AuthProvider";
 import { useWorkspace } from "../auth/WorkspaceProvider";
 
@@ -23,12 +24,16 @@ export function PaymentsWorkspace({ patientId, patientName }: { patientId?: numb
   const client = useQueryClient();
   const canView = allowed(user, "payments", "view");
   const canCreate = allowed(user, "payments", "create");
+  const canModify = allowed(user, "payments", "modify");
+  const canDelete = allowed(user, "payments", "delete");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<PaymentInput["method"]>("cash");
   const [date, setDate] = useState(clinicDate());
   const [currency, setCurrency] = useState<Currency>("USD");
   const [note, setNote] = useState("");
   const [validation, setValidation] = useState("");
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [deletingPayment, setDeletingPayment] = useState<Payment | null>(null);
   const [activity, setActivity] = useState<ActivityFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -38,15 +43,31 @@ export function PaymentsWorkspace({ patientId, patientName }: { patientId?: numb
     queryKey: ["payments", roomId, patientId], enabled: canView && !!patientId,
     queryFn: ({ signal }) => api<PaymentSummary>(`/api/payments/${patientId}`, { signal }),
   });
+  const refreshPaymentData = () => Promise.all([
+    client.invalidateQueries({ queryKey: ["payments", roomId, patientId] }),
+    client.invalidateQueries({ queryKey: ["reports"] }),
+    client.invalidateQueries({ queryKey: ["dashboard"] }),
+    client.invalidateQueries({ queryKey: ["dynamic-dashboard-clinical"] }),
+  ]);
   const mutation = useMutation({
-    mutationFn: (body: PaymentInput) => api(`/api/payments/${patientId}`, { method: "POST", body: JSON.stringify(body) }),
+    mutationFn: (body: PaymentInput) => api(editingPaymentId ? `/api/payments/${patientId}/${editingPaymentId}` : `/api/payments/${patientId}`, { method: editingPaymentId ? "PUT" : "POST", body: JSON.stringify(body) }),
     onSuccess: async () => {
-      setAmount(""); setNote(""); setValidation(""); setPage(1);
-      await client.invalidateQueries({ queryKey: ["payments", roomId, patientId] });
+      setAmount(""); setMethod("cash"); setDate(clinicDate()); setNote(""); setValidation(""); setEditingPaymentId(null); setPage(1);
+      await refreshPaymentData();
+    },
+    onError: (error) => setValidation(t(errorKey(error))),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api(`/api/payments/${patientId}/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      if (editingPaymentId === deletingPayment?.id) { setEditingPaymentId(null); setAmount(""); setMethod("cash"); setDate(clinicDate()); setNote(""); }
+      setDeletingPayment(null); setValidation("");
+      await refreshPaymentData();
     },
     onError: (error) => setValidation(t(errorKey(error))),
   });
   useEffect(() => { setPage(1); }, [patientId, activity, activitySort, activityDirection]);
+  useEffect(() => { setEditingPaymentId(null); setDeletingPayment(null); setAmount(""); setNote(""); }, [patientId]);
   useEffect(() => { if (query.data) setCurrency(query.data.baseCurrency); }, [patientId, query.data?.baseCurrency]);
   useEffect(() => {
     const total = query.data?.ledger.filter((entry) => activity === "all" || entry.type === activity).length ?? 0;
@@ -58,6 +79,13 @@ export function PaymentsWorkspace({ patientId, patientName }: { patientId?: numb
     const parsed = paymentInputSchema.safeParse({ amount, method, date, currency, note });
     if (!parsed.success) { setValidation(t(parsed.error.issues[0]?.message ?? "VALIDATION_ERROR")); return; }
     mutation.mutate(parsed.data);
+  }
+  function editPayment(payment: Payment) {
+    setEditingPaymentId(payment.id); setAmount(payment.amount); setMethod(payment.method);
+    setDate(payment.date); setCurrency(payment.currency); setNote(payment.note); setValidation("");
+  }
+  function cancelEdit() {
+    setEditingPaymentId(null); setAmount(""); setMethod("cash"); setDate(clinicDate()); setCurrency(data.baseCurrency); setNote(""); setValidation("");
   }
   if (!canView) return <div className="card p-8 text-center text-muted">{t("paymentAccess")}</div>;
   if (patientId && query.error) return <div className="space-y-3"><ErrorMessage message={t(errorKey(query.error))}/><Button onClick={() => void query.refetch()}>{t("retry")}</Button></div>;
@@ -79,6 +107,7 @@ export function PaymentsWorkspace({ patientId, patientName }: { patientId?: numb
     ["paymentBalance", data.patientBalance, Scale, "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-200"],
   ] as const;
   return <div className="space-y-3">
+    {deletingPayment && <ConfirmDialog title={t("paymentDeleteTitle")} message={t("paymentDeleteMessage", { amount: `${deletingPayment.amount} ${deletingPayment.currency}` })} confirmLabel={t("paymentDeleteAction")} pending={deleteMutation.isPending} error={deleteMutation.error ? t(errorKey(deleteMutation.error)) : undefined} onCancel={() => { setDeletingPayment(null); setValidation(""); }} onConfirm={() => deleteMutation.mutate(deletingPayment.id)}/>}
     <header>
       <h1 className="text-2xl font-bold tracking-tight">{t("paymentsTitle")}</h1>
       <p className="mt-0.5 text-xs text-muted">{patientId ? t("paymentPatientAccount", { patient: patientName ?? "" }) : t("paymentNoPatientSelected")}</p>
@@ -104,22 +133,23 @@ export function PaymentsWorkspace({ patientId, patientName }: { patientId?: numb
           </select>
         </div>
         <div className="min-h-72 overflow-auto"><table className="w-full text-left text-sm">
-          <thead className="sticky top-0 bg-soft text-muted"><tr>{([['date','odDate'],['description','paymentDescription'],['charge',patientId ? "paymentChargeColumn" : "paymentType_charge"],['payment',patientId ? "paymentPaymentColumn" : "paymentType_payment"]] as const).map(([column,label]) => <th key={column} aria-sort={activitySort === column ? activityDirection === "asc" ? "ascending" : "descending" : "none"} className={`p-3 font-medium ${column === "charge" || column === "payment" ? "text-right" : ""}`}><button type="button" className="inline-flex items-center gap-1" onClick={() => { setActivityDirection(activitySort === column && activityDirection === "asc" ? "desc" : "asc"); setActivitySort(column); }}>{t(label, patientId && (column === "charge" || column === "payment") ? { currency: data.baseCurrency } : undefined)}<span aria-hidden="true">{activitySort === column ? activityDirection === "asc" ? "↑" : "↓" : "↕"}</span></button></th>)}</tr></thead>
+          <thead className="sticky top-0 bg-soft text-muted"><tr>{(canModify || canDelete) && <th className="w-20 p-3 font-medium">{t("patientActions")}</th>}{([['date','odDate'],['description','paymentDescription'],['charge',patientId ? "paymentChargeColumn" : "paymentType_charge"],['payment',patientId ? "paymentPaymentColumn" : "paymentType_payment"]] as const).map(([column,label]) => <th key={column} aria-sort={activitySort === column ? activityDirection === "asc" ? "ascending" : "descending" : "none"} className={`p-3 font-medium ${column === "charge" || column === "payment" ? "text-right" : ""}`}><button type="button" className="inline-flex items-center gap-1" onClick={() => { setActivityDirection(activitySort === column && activityDirection === "asc" ? "desc" : "asc"); setActivitySort(column); }}>{t(label, patientId && (column === "charge" || column === "payment") ? { currency: data.baseCurrency } : undefined)}<span aria-hidden="true">{activitySort === column ? activityDirection === "asc" ? "↑" : "↓" : "↕"}</span></button></th>)}</tr></thead>
           <tbody>{rows.map((entry) => <tr key={`${entry.type}-${entry.id}`} className="border-t border-line hover:bg-soft/60">
+            {(canModify || canDelete) && <td className="p-2"><div className="flex items-center gap-1">{entry.type === "payment" && canModify && <button type="button" className="rounded p-2 text-accent-ink hover:bg-accent-soft" aria-label={t("paymentEdit")} title={t("paymentEdit")} onClick={() => { const payment = data.payments.find((item) => item.id === entry.id); if (payment) editPayment(payment); }}><Pencil size={15}/></button>}{entry.type === "payment" && canDelete && <button type="button" className="rounded p-2 text-danger-ink hover:bg-soft" aria-label={t("paymentDelete")} title={t("paymentDelete")} onClick={() => { const payment = data.payments.find((item) => item.id === entry.id); if (payment) setDeletingPayment(payment); }}><Trash2 size={15}/></button>}</div></td>}
             <td className="whitespace-nowrap p-3 text-xs">{formatDate(entry.date)}</td>
             <td className="p-3"><p className="font-medium">{entry.type === "payment" ? t(`paymentMethod_${entry.method ?? "cash"}`) : entry.description}</p>{entry.type === "payment" && <p className="mt-0.5 text-xs text-muted">{entry.originalAmount} {entry.originalCurrency}{entry.description ? ` · ${entry.description}` : ""}</p>}</td>
             <td className="whitespace-nowrap p-3 text-right font-medium tabular-nums">{entry.type === "charge" ? money(entry.baseAmount) : "—"}</td>
             <td className="whitespace-nowrap p-3 text-right font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{entry.type === "payment" ? money(entry.baseAmount) : "—"}</td>
-          </tr>)}{!rows.length && <tr><td colSpan={4} className="p-8 text-center text-muted">{t("paymentNoEntries")}</td></tr>}</tbody>
-          {filtered.length > 0 && <tfoot><tr className="border-t border-line bg-soft/70"><td colSpan={3} className="p-3 font-semibold">{t("paymentBalance")}</td><td className="p-3 text-right text-lg font-bold tabular-nums text-danger-ink">{money(data.patientBalance)}</td></tr></tfoot>}
+          </tr>)}{!rows.length && <tr><td colSpan={canModify || canDelete ? 5 : 4} className="p-8 text-center text-muted">{t("paymentNoEntries")}</td></tr>}</tbody>
+          {filtered.length > 0 && <tfoot><tr className="border-t border-line bg-soft/70"><td colSpan={canModify || canDelete ? 4 : 3} className="p-3 font-semibold">{t("paymentBalance")}</td><td className="p-3 text-right text-lg font-bold tabular-nums text-danger-ink">{money(data.patientBalance)}</td></tr></tfoot>}
         </table></div>
         <Pagination page={page} pageSize={pageSize} total={filtered.length} busy={query.isFetching} label={t("paymentPagination")} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}/>
       </section>
-      <section className="card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">{t("paymentRecord")}</h2>
+      <section className="card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">{t(editingPaymentId ? "paymentEditTitle" : "paymentRecord")}</h2>
         <p className="mt-1 text-xs text-muted">{t("paymentPartialAccepted")}</p></div>
-        {canCreate && <Button type="submit" form="payment-record-form" className="!min-h-0 !px-4 !py-2" disabled={mutation.isPending || !patientId}>{t(mutation.isPending ? "saving" : "paymentSave")}</Button>}</div>
+        {((editingPaymentId && canModify) || (!editingPaymentId && canCreate)) && <div className="flex gap-2">{editingPaymentId && <button type="button" className="button-secondary !min-h-0 !px-3 !py-2 text-xs" disabled={mutation.isPending} onClick={cancelEdit}>{t("patientCancel")}</button>}<Button type="submit" form="payment-record-form" className="!min-h-0 !px-4 !py-2" disabled={mutation.isPending || !patientId}>{t(mutation.isPending ? "saving" : editingPaymentId ? "save" : "paymentSave")}</Button></div>}</div>
         {validation && <div className="mt-3"><ErrorMessage message={validation}/></div>}
-        {canCreate ? <form id="payment-record-form" className="mt-4 space-y-3" onSubmit={submit}>{!patientId && <p className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent-ink">{t("paymentSelectPatient")}</p>}<fieldset disabled={mutation.isPending || !patientId} className="space-y-3">
+        {(canCreate || (editingPaymentId && canModify)) ? <form id="payment-record-form" className="mt-4 space-y-3" onSubmit={submit}>{!patientId && <p className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent-ink">{t("paymentSelectPatient")}</p>}<fieldset disabled={mutation.isPending || !patientId} className="space-y-3">
           <div className="grid grid-cols-2 gap-3"><Field id="payment-amount" label={t("paymentAmount")}><input id="payment-amount" className="input" type="number" min="0.01" max="999999999999.99" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)}/></Field>
             <Field id="payment-currency" label={t("paymentCurrency")}><select id="payment-currency" className="input" value={currency} onChange={(e) => setCurrency(e.target.value as Currency)}><option value="USD">USD</option><option value="LBP">LBP</option></select></Field></div>
           <Field id="payment-method" label={t("paymentMethod")}><select id="payment-method" className="input" value={method} onChange={(e) => setMethod(e.target.value as PaymentInput["method"])}><option value="cash">{t("paymentMethod_cash")}</option><option value="card">{t("paymentMethod_card")}</option></select></Field>

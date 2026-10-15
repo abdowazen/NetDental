@@ -40,5 +40,5 @@ export const purchaseInvoiceSearchSchema = z.object({
 }).strict().refine((value) => !value.from || !value.to || value.to >= value.from, { path: ["to"], message: "billExpenseDateInvalid" });
 export type PurchaseInvoiceSearch = z.infer<typeof purchaseInvoiceSearchSchema>;
 export type PurchaseInvoiceList = { invoices: PurchaseInvoice[]; total: number; baseCurrency: Currency; totalBaseAmount: string };
-export type PurchaseProductOption = { id: number; name: string; brand: string; defaultPrice: string; currency: Currency; expiryDate: string; currentQuantity: string };
+export type PurchaseProductOption = { id: number; productId: number; name: string; brand: string; defaultPrice: string; currency: Currency; expiryDate: string; currentQuantity: string };
 export type PurchaseProductOptionList = { products: PurchaseProductOption[]; effectiveRate: ExchangeRate | null };

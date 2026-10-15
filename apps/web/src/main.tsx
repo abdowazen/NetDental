@@ -29,6 +29,7 @@ import { TreatmentWorkspacePage } from "./features/treatment/TreatmentWorkspaceP
 import { NewPatientsReportPage } from "./features/reports/NewPatientsReportPage";
 import { LabStatementReportPage } from "./features/reports/LabStatementReportPage";
 import { PatientsStatementReportPage } from "./features/reports/PatientsStatementReportPage";
+import { CompletedBalancesReportPage } from "./features/reports/CompletedBalancesReportPage";
 import { BillingAnalyticsPage } from "./features/reports/BillingAnalyticsPage";
 import { InventoryAnalyticsPage } from "./features/reports/InventoryAnalyticsPage";
 import { BillCategorySearchPage } from "./features/billing/BillCategorySearchPage";
@@ -126,6 +127,9 @@ createRoot(document.getElementById("root")!).render(
                   </Route>
                   <Route element={<ProtectedRoute screen="reportPatientsStatement" scoped />}>
                     <Route path="/reports/patients-statement" element={<PatientsStatementReportPage />} />
+                  </Route>
+                  <Route element={<ProtectedRoute screen="reportCompletedBalances" scoped />}>
+                    <Route path="/reports/completed-balances" element={<CompletedBalancesReportPage />} />
                   </Route>
                   <Route element={<ProtectedRoute screen="reportLabStatement" scoped />}>
                     <Route path="/reports/lab-statement" element={<LabStatementReportPage />} />

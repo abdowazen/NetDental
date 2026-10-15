@@ -77,10 +77,22 @@ export async function checkPayments(
   assert.equal(restoredUsdSummary.patientBalance, "120.00");
   assert.ok(restoredUsdSummary.payments.every((payment: { baseCurrency: string }) => payment.baseCurrency === "USD"));
   await db.payment.deleteMany({ where: { patientId, note: "USD after base change" } });
+  assert.equal((await app.inject({ method: "POST", url, headers, payload: { amount: "7", method: "cash", date: "2026-01-02", currency: "USD", note: "Payment to amend" } })).statusCode, 201);
+  const amendable = await db.payment.findFirstOrThrow({ where: { patientId, note: "Payment to amend" } });
+  const paymentUrl = `${url}/${amendable.id}`;
+  const updated = await app.inject({ method: "PUT", url: paymentUrl, headers, payload: { amount: "8", method: "card", date: "2026-01-02", currency: "USD", note: "Edited payment" } });
+  assert.equal(updated.statusCode, 204, updated.body);
+  const edited = await db.payment.findUniqueOrThrow({ where: { id: amendable.id } });
+  assert.equal(edited.amount.toFixed(2), "8.00");
+  assert.equal(edited.baseAmount.toFixed(2), "8.00");
+  assert.equal(edited.method, "card");
+  assert.equal((await app.inject({ method: "PUT", url: paymentUrl, headers: staffHeaders, payload: { amount: "9", method: "cash", date: "2026-01-02", currency: "USD", note: "Forbidden" } })).statusCode, 403);
+  assert.equal((await app.inject({ method: "DELETE", url: paymentUrl, headers })).statusCode, 204);
+  assert.equal(await db.payment.count({ where: { id: amendable.id } }), 0);
   assert.equal((await app.inject({ url, headers: { ...headers, "x-clinic-room": String(otherRoom) } })).statusCode, 404);
   assert.equal((await app.inject({ url, headers: staffHeaders })).statusCode, 403);
   assert.equal((await app.inject({ method: "POST", url, headers, payload: { amount: "0", method: "cash", date: "2026-01-02", currency: "USD", note: "" } })).statusCode, 400);
   assert.equal((await app.inject({ method: "POST", url, headers, payload: { amount: "5", method: "bank_transfer", date: "2026-01-02", currency: "USD", note: "" } })).statusCode, 400);
   assert.equal((await app.inject({ method: "POST", url, headers, payload: { amount: "5", method: "cash", date: "2099-01-01", currency: "USD", note: "" } })).statusCode, 400);
-  console.log("Payment API checks passed: plan totals, exchange-rate fallback, immutable conversion snapshots, permissions and room isolation.");
+  console.log("Payment API checks passed: plan totals, exchange-rate fallback, edit/delete actions, permissions and room isolation.");
 }

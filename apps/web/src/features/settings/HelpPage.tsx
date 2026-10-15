@@ -18,7 +18,7 @@ const sections: { id: string; icon: typeof FileQuestion; items: HelpAccess[] }[]
   { id: "laboratory", icon: FlaskConical, items: [["treatment"], ["laboratoriesCatalog"], ["treatment"], ["treatment"], ["treatment"]] },
   { id: "payments", icon: CircleDollarSign, items: [["payments"], ["payments"], ["currencySetup"], ["payments", "billsPayments", "purchaseInvoice"], ["billsPayments", "billsCategories"], ["payments", "billsPayments"]] },
   { id: "inventory", icon: Package, items: [["suppliersVendors"], ["suppliesMaterials"], ["purchaseInvoice"], ["purchaseInvoice"], ["purchaseInvoice"], ["purchaseInvoice"]] },
-  { id: "analytics", icon: BarChart3, items: [["dashboard"], ["reportNewPatients"], ["reportPatientsStatement", "reportLabStatement"], ["reportBillingPayments", "reportInventoryAnalytics"], ["reportNewPatients", "reportPatientsStatement", "reportLabStatement", "reportBillingPayments", "reportInventoryAnalytics"]] },
+  { id: "analytics", icon: BarChart3, items: [["dashboard"], ["reportNewPatients"], ["reportPatientsStatement", "reportCompletedBalances", "reportLabStatement"], ["reportBillingPayments", "reportInventoryAnalytics"], ["reportNewPatients", "reportPatientsStatement", "reportCompletedBalances", "reportLabStatement", "reportBillingPayments", "reportInventoryAnalytics"]] },
   { id: "administration", icon: UsersRound, items: ["admin", "admin", "admin", "admin", "admin", "admin"] },
   { id: "settings", icon: Settings2, items: [["settings"], ["settings"], ["settings"], ["currencySetup"], ["currencySetup"]] },
   { id: "backup", icon: DatabaseBackup, items: Array<HelpAccess>(5).fill(["backupRestore"]) },

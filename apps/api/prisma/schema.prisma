@@ -134,6 +134,7 @@ model SurgicalRoom {
   billCategories BillCategory[]
   billExpenses BillExpense[]
   suppliers Supplier[]
+  supplyProducts SupplyProduct[]
   supplyItems SupplyItem[]
   purchaseInvoices PurchaseInvoice[]
   appointments Appointment[]
@@ -185,7 +186,7 @@ model Supplier {
   phone String @default("") @db.VarChar(40)
   address String @default("") @db.VarChar(500)
   active Boolean @default(true)
-  supplyItems SupplyItem[]
+  supplyItemLinks SupplyItemSupplier[]
   purchaseInvoices PurchaseInvoice[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -194,14 +195,27 @@ model Supplier {
   @@index([roomId, phone])
 }
 
-model SupplyItem {
+model SupplyProduct {
   id Int @id @default(autoincrement())
   roomId Int
   room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
   name String @db.VarChar(150)
+  variants SupplyItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([roomId, name])
+  @@index([roomId, name])
+}
+
+model SupplyItem {
+  id Int @id @default(autoincrement())
+  roomId Int
+  room SurgicalRoom @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  productId Int
+  product SupplyProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  name String @db.VarChar(150)
   brand String @db.VarChar(100)
-  supplierId Int?
-  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  suppliers SupplyItemSupplier[]
   openingBalance Decimal @default(0) @db.Decimal(18, 3)
   defaultPrice Decimal @db.Decimal(18, 2)
   currency Currency
@@ -211,11 +225,21 @@ model SupplyItem {
   purchaseLines PurchaseInvoiceLine[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  @@unique([roomId, name, brand])
+  @@unique([productId, brand])
   @@index([roomId, name])
   @@index([roomId, brand])
-  @@index([roomId, supplierId])
+  @@index([roomId, productId])
   @@index([roomId, expiryDate])
+}
+
+model SupplyItemSupplier {
+  itemId Int
+  item SupplyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplierId Int
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  @@id([itemId, supplierId])
+  @@index([supplierId, itemId])
 }
 
 model PurchaseInvoice {

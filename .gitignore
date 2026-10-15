@@ -11,3 +11,4 @@ playwright-report/
 *.log
 .runtime/
 data/patient-files/
+vendor/windows/*.exe

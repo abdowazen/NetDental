@@ -10,9 +10,19 @@ const dependencies = Object.fromEntries(
     ([name]) => name !== "@clinic/shared",
   ),
 );
+dependencies.prisma = rootPackage.devDependencies.prisma;
 await build({
   entryPoints: ["apps/api/src/server.ts"],
   outfile: ".runtime/api/server.mjs",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  external: Object.keys(dependencies),
+  target: "node22",
+});
+await build({
+  entryPoints: ["apps/api/src/create-admin.ts"],
+  outfile: ".runtime/api/create-admin.mjs",
   bundle: true,
   platform: "node",
   format: "esm",
@@ -50,6 +60,7 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 await cp("node_modules/.prisma", ".runtime/api/node_modules/.prisma", {
   recursive: true,
 });
+await cp("apps/api/prisma", ".runtime/api/prisma", { recursive: true });
 await cp("apps/desktop/dist", ".runtime/desktop/dist", { recursive: true });
 await writeFile(
   ".runtime/desktop/package.json",

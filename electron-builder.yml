@@ -12,13 +12,19 @@ extraResources:
   - from: apps/web/dist
     to: web
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch: [x64]
-  signAndEditExecutable: false
+  signExecutable: false
 nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
 asar: true
 npmRebuild: false

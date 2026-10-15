@@ -25,6 +25,11 @@ app.setPath("userData", join(app.getPath("appData"), "Dental Clinic"));
 const customUserData = app.commandLine.getSwitchValue("user-data-dir");
 if (customUserData) app.setPath("userData", resolve(customUserData));
 const languagePath = () => join(app.getPath("userData"), "language.json");
+const machineConfigPath = join(
+  process.env.ProgramData ?? "C:\\ProgramData",
+  "NetDenty",
+  "desktop.env",
+);
 function isFallback(url: string) {
   return (
     url.startsWith("file:") &&
@@ -117,9 +122,12 @@ else {
     window?.focus();
   });
   void app.whenReady().then(async () => {
+    const userConfigPath = join(app.getPath("userData"), "desktop.env");
     dotenv({
       path: app.isPackaged
-        ? join(app.getPath("userData"), "desktop.env")
+        ? existsSync(machineConfigPath)
+          ? machineConfigPath
+          : userConfigPath
         : resolve(".env"),
     });
     try {

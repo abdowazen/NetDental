@@ -5,7 +5,7 @@ describe("supplies and materials validation", () => {
   const item = {
     name: "Composite resin",
     brand: "DentalCo",
-    supplierId: 12,
+    supplierIds: [12, 18, 12],
     openingBalance: "2.5",
     defaultPrice: "18",
     currency: "USD" as const,
@@ -13,16 +13,17 @@ describe("supplies and materials validation", () => {
     expiryDate: "2027-10-01",
   };
 
-  it("normalizes the opening balance and price while retaining the supplier reference", () => {
+  it("normalizes values and retains unique supplier assignments", () => {
     expect(supplyItemSchema.parse(item)).toEqual({
       ...item,
+      supplierIds: [12, 18],
       openingBalance: "2.500",
       defaultPrice: "18.00",
     });
   });
 
   it("allows an item without a supplier or expiry date", () => {
-    expect(supplyItemSchema.parse({ ...item, supplierId: null, expiryDate: "" }).supplierId).toBeNull();
+    expect(supplyItemSchema.parse({ ...item, supplierIds: [], expiryDate: "" }).supplierIds).toEqual([]);
     expect(supplyItemSchema.parse({ ...item, openingBalance: "" }).openingBalance).toBe("0.000");
   });
 

@@ -1,0 +1,27 @@
+appId: com.netdenty.workstation
+productName: NetDenty
+artifactName: NetDenty-Workstation-Setup-${version}.${ext}
+directories:
+  app: .runtime/workstation
+  output: release
+files:
+  - dist/**/*
+  - package.json
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  signExecutable: false
+nsis:
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+asar: true
+npmRebuild: false

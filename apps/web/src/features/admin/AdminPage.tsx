@@ -41,6 +41,7 @@ const permissionTreeRows: PermissionTreeRow[] = [
   { kind: "group", label: "analyticsClinical", depth: 1 },
   { kind: "screen", screen: "reportNewPatients", depth: 2 },
   { kind: "screen", screen: "reportPatientsStatement", depth: 2 },
+  { kind: "screen", screen: "reportCompletedBalances", depth: 2 },
   { kind: "screen", screen: "reportLabStatement", depth: 2 },
   { kind: "group", label: "analyticsBilling", depth: 1 },
   { kind: "screen", screen: "reportBillingPayments", label: "billingAnalyticsReport", depth: 2 },

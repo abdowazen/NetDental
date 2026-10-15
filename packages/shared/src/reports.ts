@@ -55,6 +55,8 @@ export type LabStatementReport = {
 export const patientStatementQuerySchema = z.object({
   patientId: z.coerce.number().int().positive().optional(),
   activity: z.enum(["all", "charge", "payment"]).default("all"),
+  treatmentType: z.enum(["all", "planned", "unplanned"]).default("all"),
+  treatmentStatus: z.enum(["all", "completed"]).default("all"),
   from: rateDateSchema,
   to: rateDateSchema,
   page: z.coerce.number().int().min(1).max(1000000).default(1),
@@ -87,6 +89,40 @@ export type PatientStatementReport = {
   periodCharges: string;
   periodPayments: string;
   closingBalance: string;
+};
+
+export const completedBalancesQuerySchema = z.object({
+  period: z.enum(["monthly", "yearly", "custom"]).default("monthly"),
+  from: rateDateSchema,
+  to: rateDateSchema,
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(30),
+  sort: z.enum(["patientName", "phone", "completedCount", "completedCharges", "payments", "remaining"]).default("remaining"),
+  direction: z.enum(["asc", "desc"]).default("desc"),
+}).strict().refine((value) => value.to >= value.from, { message: "completedBalancesDateInvalid", path: ["to"] });
+export type CompletedBalancesQuery = z.infer<typeof completedBalancesQuerySchema>;
+export type CompletedBalanceRow = {
+  patientId: number;
+  patientFileId: string;
+  patientName: string;
+  phone: string;
+  completedCount: number;
+  completedCharges: string;
+  payments: string;
+  remaining: string;
+};
+export type CompletedBalancesReport = {
+  baseCurrency: "USD" | "LBP";
+  from: string;
+  to: string;
+  total: number;
+  rows: CompletedBalanceRow[];
+  totals: {
+    completedCount: number;
+    completedCharges: string;
+    payments: string;
+    remaining: string;
+  };
 };
 
 export const billingAnalyticsQuerySchema = z.object({
@@ -140,8 +176,9 @@ export type InventoryAnalyticsReport = {
   summary: BillingAnalyticsSummary; comparison: (BillingAnalyticsSummary & { from: string; to: string; changePercent: string | null }) | null;
   buckets: { key: string; current: string; comparison: string }[];
   suppliers: { supplierId: number; supplierName: string; total: string; count: number }[];
-  products: { productId: number; productName: string; brand: string; total: string; quantity: string }[];
+  products: { productId: number; productName: string; brands: string[]; total: string; quantity: string }[];
+  stockProducts: { productId: number; productName: string; totalQuantity: string; variants: { itemId: number; brand: string; quantity: string; suppliers: string[] }[] }[];
   paymentTypes: { paymentType: "cash" | "account"; total: string; count: number }[];
-  supplierOptions: { id: number; name: string }[]; productOptions: { id: number; name: string; brand: string }[]; brandOptions: string[];
+  supplierOptions: { id: number; name: string }[]; productOptions: { id: number; name: string }[]; brandOptions: string[];
   invoices: PurchaseInvoice[]; total: number;
 };

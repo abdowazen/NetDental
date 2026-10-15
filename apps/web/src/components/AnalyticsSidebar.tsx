@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { Activity, BarChart3, ChevronDown, ChevronRight, CreditCard, FlaskConical, Package, Receipt, Stethoscope, UsersRound } from "lucide-react";
+import { Activity, BarChart3, ChevronDown, ChevronRight, CircleDollarSign, CreditCard, FlaskConical, Package, Receipt, Stethoscope, UsersRound } from "lucide-react";
 import { allowed } from "@clinic/shared";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../features/auth/AuthProvider";
@@ -9,16 +9,17 @@ export function AnalyticsSidebar({ collapsed, expandSidebar }: { collapsed: bool
   const { t } = useTranslation(); const { user } = useAuth(); const { pathname } = useLocation();
   const newPatientsAllowed = allowed(user, "reportNewPatients");
   const patientsStatementAllowed = allowed(user, "reportPatientsStatement");
+  const completedBalancesAllowed = allowed(user, "reportCompletedBalances");
   const labStatementAllowed = allowed(user, "reportLabStatement");
   const clinicalDashboardAllowed = allowed(user, "dashboard");
-  const clinicalAllowed = clinicalDashboardAllowed || newPatientsAllowed || patientsStatementAllowed || labStatementAllowed;
+  const clinicalAllowed = clinicalDashboardAllowed || newPatientsAllowed || patientsStatementAllowed || completedBalancesAllowed || labStatementAllowed;
   const billingAllowed = allowed(user, "reportBillingPayments");
   const inventoryAllowed = allowed(user, "reportInventoryAnalytics");
   const [expanded, setExpanded] = useState(pathname.startsWith("/reports"));
   const [clinicalExpanded, setClinicalExpanded] = useState(pathname.startsWith("/reports"));
   const [billingExpanded, setBillingExpanded] = useState(pathname === "/reports/billing-payments");
   const [inventoryExpanded, setInventoryExpanded] = useState(pathname === "/reports/inventory");
-  const clinicalActive = ["/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/lab-statement"].includes(pathname);
+  const clinicalActive = ["/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/completed-balances", "/reports/lab-statement"].includes(pathname);
   if (!clinicalAllowed && !billingAllowed && !inventoryAllowed) return null;
   const visible = !collapsed && expanded;
   return <div>
@@ -31,6 +32,7 @@ export function AnalyticsSidebar({ collapsed, expandSidebar }: { collapsed: bool
           {clinicalDashboardAllowed && <li><NavLink to="/reports/clinical" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><Activity size={16}/><span>{t("clinicalAnalytics")}</span></NavLink></li>}
           {newPatientsAllowed && <li><NavLink to="/reports/new-patients" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><UsersRound size={16}/><span>{t("reportNewPatients")}</span></NavLink></li>}
           {patientsStatementAllowed && <li><NavLink to="/reports/patients-statement" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><Receipt size={16}/><span>{t("reportPatientsStatement")}</span></NavLink></li>}
+          {completedBalancesAllowed && <li><NavLink to="/reports/completed-balances" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><CircleDollarSign size={16}/><span>{t("reportCompletedBalances")}</span></NavLink></li>}
           {labStatementAllowed && <li><NavLink to="/reports/lab-statement" className={({ isActive }) => `nav-item w-full text-left ${isActive ? "active" : ""}`}><FlaskConical size={16}/><span>{t("reportLabStatement")}</span></NavLink></li>}
         </ul>
       </li>}

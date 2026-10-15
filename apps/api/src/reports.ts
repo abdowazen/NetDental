@@ -3,6 +3,7 @@ import {
   clinicDate, convertCurrency, discountCents, discountSchema, moneyCents, moneyString, selectExchangeRate, treatmentNet,
   type Currency, type LabStatementQuery, type LabStatementReport, type NewPatientReport, type NewPatientReportQuery,
   type Patient, type PatientStatementQuery, type PatientStatementReport, type PatientStatementRow,
+  type CompletedBalancesQuery, type CompletedBalancesReport, type CompletedBalanceRow,
 } from "@clinic/shared";
 import { AccessError } from "./access.js";
 
@@ -59,6 +60,7 @@ export interface ReportStore {
   getNewPatientsReport(input: NewPatientReportQuery, roomId: number): Promise<NewPatientReport>;
   getLabStatement(input: LabStatementQuery, roomId: number): Promise<LabStatementReport>;
   getPatientStatement(input: PatientStatementQuery, roomId: number): Promise<PatientStatementReport>;
+  getCompletedBalances(input: CompletedBalancesQuery, roomId: number): Promise<CompletedBalancesReport>;
 }
 
 const signedMoney = (cents: bigint) => {
@@ -161,19 +163,25 @@ export function reportStore(db: PrismaClient): ReportStore {
     },
     async getPatientStatement(input, roomId) {
       const patientWhere = { roomId, ...(input.patientId ? { id: input.patientId } : {}) };
+      const treatmentTypeWhere = input.treatmentType === "planned"
+        ? { planId: { not: null } }
+        : input.treatmentType === "unplanned" ? { planId: null } : {};
+      const treatmentStatusWhere = input.treatmentStatus === "completed"
+        ? { status: "completed" as const }
+        : { status: { not: "cancelled" as const } };
       const through = new Date(`${input.to}T00:00:00Z`);
       const [patients, treatments, payments, totalRecords, settings, rateRows] = await Promise.all([
         db.patient.findMany({ where: patientWhere, select: { id: true, fullName: true } }),
         db.treatment.findMany({
-          where: { patient: patientWhere, date: { lte: through }, voidReason: null, status: { not: "cancelled" } },
+          where: { patient: patientWhere, ...treatmentTypeWhere, ...treatmentStatusWhere, date: { lte: through }, voidReason: null },
           include: { plan: { select: { number: true } } },
         }),
         db.payment.findMany({
-          where: { patient: patientWhere, roomId, date: { lte: through } },
+          where: { patient: patientWhere, roomId, ...treatmentTypeWhere, date: { lte: through } },
           include: { plan: { select: { number: true } } },
         }),
         db.clinicalRecord.findMany({
-          where: { patient: patientWhere, kind: { in: ["plan_total", "unplan_total"] }, voidReason: null, date: { lte: through } },
+          where: { patient: patientWhere, ...treatmentTypeWhere, kind: { in: ["plan_total", "unplan_total"] }, voidReason: null, date: { lte: through } },
           include: { plan: { select: { number: true } } }, orderBy: { recordedAt: "desc" },
         }),
         db.currencySettings.findUnique({ where: { id: roomId } }),
@@ -247,6 +255,78 @@ export function reportStore(db: PrismaClient): ReportStore {
       return { total: filtered.length, rows: filtered.slice((input.page - 1) * input.pageSize, input.page * input.pageSize), baseCurrency,
         openingBalance: signedMoney(openingBalance), periodCharges: signedMoney(periodCharges), periodPayments: signedMoney(periodPayments),
         closingBalance: signedMoney(openingBalance + periodCharges - periodPayments) };
+    },
+    async getCompletedBalances(input, roomId) {
+      const from = new Date(`${input.from}T00:00:00Z`);
+      const to = new Date(`${input.to}T00:00:00Z`);
+      const [treatments, payments, totalRecords, settings, rateRows] = await Promise.all([
+        db.treatment.findMany({
+          where: { patient: { roomId }, status: "completed", voidReason: null,
+            events: { some: { status: "completed", date: { gte: from, lte: to } } } },
+          include: { patient: { select: { id: true, fullName: true, phone: true } } },
+        }),
+        db.payment.findMany({ where: { roomId, date: { gte: from, lte: to } } }),
+        db.clinicalRecord.findMany({
+          where: { patient: { roomId }, kind: { in: ["plan_total", "unplan_total"] }, voidReason: null, date: { lte: to } },
+          orderBy: { recordedAt: "desc" },
+        }),
+        db.currencySettings.findUnique({ where: { id: roomId } }),
+        db.exchangeRate.findMany({ where: { roomId, date: { lte: new Date(`${clinicDate()}T00:00:00Z`) } }, orderBy: { date: "desc" } }),
+      ]);
+      const baseCurrency = (settings?.baseCurrency ?? "USD") as Currency;
+      const rates = rateRows.map((row) => ({ date: dateText(row.date), lbpPerUsd: row.lbpPerUsd.toFixed() }));
+      const currentRate = selectExchangeRate(rates, clinicDate());
+      if (baseCurrency === "LBP" && !currentRate) throw new AccessError("VALIDATION_ERROR");
+      const convertPayment = (payment: typeof payments[number]) => {
+        if (payment.baseCurrency === baseCurrency) return moneyCents(payment.baseAmount.toFixed(2));
+        const paymentCurrency = payment.currency as Currency;
+        if (paymentCurrency === baseCurrency) return moneyCents(payment.amount.toFixed(2));
+        const selected = payment.lbpPerUsd
+          ? { date: dateText(payment.date), lbpPerUsd: payment.lbpPerUsd.toFixed() }
+          : selectExchangeRate(rates, dateText(payment.date));
+        if (!selected) throw new AccessError("VALIDATION_ERROR");
+        return moneyCents(convertCurrency(payment.amount.toFixed(2), paymentCurrency, baseCurrency, selected));
+      };
+      type Aggregate = { patientId: number; patientName: string; phone: string; completedCount: number; charges: bigint; payments: bigint };
+      const aggregates = new Map<number, Aggregate>();
+      const groupSubtotals = new Map<string, bigint>();
+      for (const treatment of treatments) {
+        const amount = moneyCents(moneyString(treatmentNet({ price: treatment.price.toFixed(2), discount: discountSchema.parse({ type: treatment.discountType, value: treatment.discountValue.toFixed(2) }) })));
+        const aggregate = aggregates.get(treatment.patientId) ?? { patientId: treatment.patientId, patientName: treatment.patient.fullName, phone: treatment.patient.phone, completedCount: 0, charges: 0n, payments: 0n };
+        aggregate.completedCount += 1; aggregate.charges += amount; aggregates.set(treatment.patientId, aggregate);
+        const group = `${treatment.patientId}:${treatment.planId ?? "unplanned"}`;
+        groupSubtotals.set(group, (groupSubtotals.get(group) ?? 0n) + amount);
+      }
+      const latestTotals = new Map<string, typeof totalRecords[number]>();
+      for (const record of totalRecords) {
+        const key = `${record.patientId}:${record.planId ?? "unplanned"}`;
+        if (!latestTotals.has(key)) latestTotals.set(key, record);
+      }
+      for (const [group, subtotal] of groupSubtotals) {
+        const record = latestTotals.get(group); if (!record) continue;
+        const discount = discountCents(subtotal, discountSchema.parse((record.data as { discount: unknown }).discount));
+        const aggregate = aggregates.get(record.patientId); if (aggregate) aggregate.charges -= discount;
+      }
+      for (const payment of payments) {
+        const aggregate = aggregates.get(payment.patientId); if (aggregate) aggregate.payments += convertPayment(payment);
+      }
+      const allRows: CompletedBalanceRow[] = [...aggregates.values()].map((item) => ({
+        patientId: item.patientId, patientFileId: String(item.patientId).padStart(6, "0"), patientName: item.patientName,
+        phone: item.phone, completedCount: item.completedCount, completedCharges: signedMoney(item.charges),
+        payments: signedMoney(item.payments), remaining: signedMoney(item.charges > item.payments ? item.charges - item.payments : 0n),
+      })).filter((row) => signedCents(row.remaining) > 0n);
+      const value = (row: CompletedBalanceRow) => input.sort === "patientName" ? row.patientName.toLocaleLowerCase()
+        : input.sort === "phone" ? row.phone : input.sort === "completedCount" ? row.completedCount : Number(row[input.sort]);
+      allRows.sort((left, right) => {
+        const a = value(left); const b = value(right); const compared = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b));
+        return (input.direction === "asc" ? compared : -compared) || left.patientId - right.patientId;
+      });
+      const totals = allRows.reduce((result, row) => ({ completedCount: result.completedCount + row.completedCount,
+        completedCharges: result.completedCharges + signedCents(row.completedCharges), payments: result.payments + signedCents(row.payments), remaining: result.remaining + signedCents(row.remaining) }),
+      { completedCount: 0, completedCharges: 0n, payments: 0n, remaining: 0n });
+      return { baseCurrency, from: input.from, to: input.to, total: allRows.length,
+        rows: allRows.slice((input.page - 1) * input.pageSize, input.page * input.pageSize),
+        totals: { completedCount: totals.completedCount, completedCharges: signedMoney(totals.completedCharges), payments: signedMoney(totals.payments), remaining: signedMoney(totals.remaining) } };
     },
   };
 }

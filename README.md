@@ -153,6 +153,15 @@ npm run desktop:package
 
 Build on Windows x64. The installer is written under `release/`; the unpacked application is `release/win-unpacked/NetDenty.exe`. Staging includes compiled API JavaScript, production dependencies, Argon2 native assets, generated Prisma client/Windows engine, and the built renderer. PostgreSQL is not bundled. The current development installer is unsigned; production distribution needs your organization's Windows signing setup. Building an installer is distinct from installing/testing it; see `VERIFICATION.md` for checks actually performed in this environment.
 
+For clinic deployment, NetDenty also provides separate server and workstation packages:
+
+```powershell
+npm run installer:workstation
+npm run installer:server
+```
+
+The server package installs and configures PostgreSQL, migrations, the API, HTTPS, startup tasks, and the first administrator. Its generated workstation kit installs a remote-only desktop client without database credentials. See [docs/one-click-installers.md](docs/one-click-installers.md) for build inputs, installation steps, security boundaries, and release checks.
+
 The lockfile is included for reproducible workspace installation. Package upgrades should be checked together with `npm ci`, lint/type checks, tests, builds, and a packaged runtime smoke test.
 
 Versions are pinned deliberately, including Prisma 6.19.3 and matching client. A scoped override upgrades `@prisma/config`'s `deepmerge-ts` dependency to 8.0.0 to address its recursive-merge advisory; client generation and migration deployment are checked with this override. The workspace does not use custom Prisma configuration merges. `npm run format` applies the shared source formatting.

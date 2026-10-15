@@ -15,6 +15,8 @@ const signedMoney = (cents: bigint) => {
 export interface PaymentStore {
   getPayments(patientId: number, roomId: number): Promise<PaymentSummary>;
   addPayment(patientId: number, roomId: number, actorId: string, input: PaymentInput): Promise<void>;
+  updatePayment(patientId: number, roomId: number, id: string, input: PaymentInput): Promise<void>;
+  deletePayment(patientId: number, roomId: number, id: string): Promise<void>;
 }
 export function paymentStore(db: PrismaClient): PaymentStore {
   async function patient(patientId: number, roomId: number) {
@@ -124,6 +126,27 @@ export function paymentStore(db: PrismaClient): PaymentStore {
         lbpPerUsd: effectiveRate ? new Prisma.Decimal(effectiveRate.lbpPerUsd) : null,
         method: input.method, date: new Date(`${input.date}T00:00:00Z`), note: input.note,
       } });
+    },
+    async updatePayment(patientId, roomId, id, input) {
+      if (input.date > clinicDate()) throw new AccessError("VALIDATION_ERROR");
+      await patient(patientId, roomId);
+      const existing = await db.payment.findFirst({ where: { id, patientId, roomId } });
+      if (!existing) throw new AccessError("NOT_FOUND");
+      const base = await baseCurrency(roomId);
+      const effectiveRate = await rate(roomId, input.date);
+      if (input.currency !== base && !effectiveRate) throw new AccessError("VALIDATION_ERROR");
+      const baseAmount = convertCurrency(input.amount, input.currency, base, effectiveRate);
+      await db.payment.update({ where: { id }, data: {
+        amount: new Prisma.Decimal(input.amount), currency: input.currency, baseCurrency: base,
+        baseAmount: new Prisma.Decimal(baseAmount), lbpPerUsd: effectiveRate ? new Prisma.Decimal(effectiveRate.lbpPerUsd) : null,
+        method: input.method, date: new Date(`${input.date}T00:00:00Z`), note: input.note,
+      } });
+    },
+    async deletePayment(patientId, roomId, id) {
+      await patient(patientId, roomId);
+      const existing = await db.payment.findFirst({ where: { id, patientId, roomId }, select: { id: true } });
+      if (!existing) throw new AccessError("NOT_FOUND");
+      await db.payment.delete({ where: { id } });
     },
   };
 }

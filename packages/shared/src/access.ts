@@ -9,6 +9,7 @@ export const screens = [
   "laboratoriesCatalog",
   "reportNewPatients",
   "reportPatientsStatement",
+  "reportCompletedBalances",
   "reportLabStatement",
   "reportBillingPayments",
   "reportInventoryAnalytics",
@@ -51,6 +52,7 @@ export const defaultPages = [
   "clinicalAnalytics",
   "newPatients",
   "patientsStatement",
+  "completedBalances",
   "labStatement",
   "billingAnalytics",
   "inventoryAnalytics",
@@ -85,6 +87,7 @@ export const defaultPageOptions: ReadonlyArray<{
   { value: "clinicalAnalytics", path: "/reports/clinical", label: "clinicalAnalytics", screen: "dashboard" },
   { value: "newPatients", path: "/reports/new-patients", label: "reportNewPatients", screen: "reportNewPatients" },
   { value: "patientsStatement", path: "/reports/patients-statement", label: "reportPatientsStatement", screen: "reportPatientsStatement" },
+  { value: "completedBalances", path: "/reports/completed-balances", label: "reportCompletedBalances", screen: "reportCompletedBalances" },
   { value: "labStatement", path: "/reports/lab-statement", label: "reportLabStatement", screen: "reportLabStatement" },
   { value: "billingAnalytics", path: "/reports/billing-payments", label: "billingAnalyticsReport", screen: "reportBillingPayments" },
   { value: "inventoryAnalytics", path: "/reports/inventory", label: "inventoryAnalyticsReport", screen: "reportInventoryAnalytics" },
@@ -141,6 +144,8 @@ function automaticLandingPath(user: { role: string; access?: Access } | null) {
         ? "/reports/new-patients"
       : allowed(user, "reportPatientsStatement")
         ? "/reports/patients-statement"
+      : allowed(user, "reportCompletedBalances")
+        ? "/reports/completed-balances"
       : allowed(user, "reportLabStatement")
         ? "/reports/lab-statement"
       : allowed(user, "reportBillingPayments")

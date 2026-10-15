@@ -40,6 +40,7 @@ import {
   purchaseInvoiceSearchSchema,
   labStatementQuerySchema,
   patientStatementQuerySchema,
+  completedBalancesQuerySchema,
   billingAnalyticsQuerySchema,
   inventoryAnalyticsQuerySchema,
   patientSearchSchema,
@@ -531,6 +532,10 @@ export async function buildApp(store: Store, config: Config) {
     const roomId = await scoped(req, "reportPatientsStatement", "view");
     return store.getPatientStatement(patientStatementQuerySchema.parse(req.query), roomId);
   });
+  app.get("/api/reports/completed-balances", async (req) => {
+    const roomId = await scoped(req, "reportCompletedBalances", "view");
+    return store.getCompletedBalances(completedBalancesQuerySchema.parse(req.query), roomId);
+  });
   app.get("/api/reports/billing-payments", async (req) => {
     const roomId = await scoped(req, "reportBillingPayments", "view");
     return store.getBillingAnalytics(billingAnalyticsQuerySchema.parse(req.query), roomId);
@@ -611,6 +616,11 @@ export async function buildApp(store: Store, config: Config) {
     const roomId = await scoped(req, "suppliesMaterials", "view");
     const { q } = inventoryOptionSearchSchema.parse(req.query);
     return store.searchBrandOptions(q, roomId);
+  });
+  app.get("/api/supplies/products", async (req) => {
+    const roomId = await scoped(req, "suppliesMaterials", "view");
+    const { q } = inventoryOptionSearchSchema.parse(req.query);
+    return store.searchProductOptions(q, roomId);
   });
   app.get("/api/supplies/suppliers", async (req) => {
     const roomId = await scoped(req, "suppliesMaterials", "view");
@@ -886,7 +896,7 @@ export async function buildApp(store: Store, config: Config) {
     app.setNotFoundHandler((req, reply) => {
       if (
         req.method === "GET" &&
-        (["/", "/login", "/dashboard", "/appointments", "/settings", "/settings/general", "/settings/currency", "/settings/backup", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/lab-statement", "/reports/billing-payments", "/reports/inventory", "/treatment"].includes(
+        (["/", "/login", "/dashboard", "/appointments", "/settings", "/settings/general", "/settings/currency", "/settings/backup", "/settings/help", "/admin", "/admin/users", "/admin/locations", "/admin/logs", "/reports/clinical", "/reports/new-patients", "/reports/patients-statement", "/reports/completed-balances", "/reports/lab-statement", "/reports/billing-payments", "/reports/inventory", "/treatment"].includes(
           req.url.split("?")[0],
         ) ||
           /^\/(?:patients|procedures)(?:\/(?:new|\d+))?$/.test(req.url.split("?")[0]) ||

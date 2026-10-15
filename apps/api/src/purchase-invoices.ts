@@ -46,7 +46,7 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
     const supplier = await client.supplier.findFirst({ where: { id: input.supplierId, roomId, ...(requireActive ? { active: true } : {}) } });
     if (!supplier) throw new AccessError("VALIDATION_ERROR");
     const ids = input.lines.map((line) => line.itemId);
-    const items = await client.supplyItem.findMany({ where: { id: { in: ids }, roomId, supplierId: input.supplierId } });
+    const items = await client.supplyItem.findMany({ where: { id: { in: ids }, roomId, suppliers: { some: { supplierId: input.supplierId } } } });
     if (items.length !== ids.length) throw new AccessError("VALIDATION_ERROR");
     const byId = new Map(items.map((item) => [item.id, item])); const previous = new Map(old?.lines.map((line) => [line.itemId, line]) ?? []);
     let total = new Prisma.Decimal(0);
@@ -98,19 +98,20 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
           date: new Date(`${input.date}T00:00:00Z`), note: input.note, lines: { create: value.lines } }, include: invoiceInclude }); return publicInvoice(row, value.base); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     },
     async deletePurchaseInvoice(id, roomId) { return db.$transaction(async (tx) => { const row = await tx.purchaseInvoice.findFirst({ where: { id, roomId }, include: invoiceInclude }); if (!row) return false; await adjustStock(tx, row.lines, []); await tx.purchaseInvoice.delete({ where: { id } }); return true; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); },
-    async purchaseProducts(supplierId, roomId, date) { const [rows, effectiveRate] = await Promise.all([db.supplyItem.findMany({ where: { roomId, supplierId }, orderBy: [{ name: "asc" }, { brand: "asc" }] }), rate(db, roomId, date)]); return { products: rows.map((item) => ({ id: item.id, name: item.name, brand: item.brand, defaultPrice: item.defaultPrice.toFixed(2), currency: item.currency, expiryDate: item.expiryDate ? day(item.expiryDate) : "", currentQuantity: item.currentQuantity.toFixed(3) })), effectiveRate }; },
+    async purchaseProducts(supplierId, roomId, date) { const [rows, effectiveRate] = await Promise.all([db.supplyItem.findMany({ where: { roomId, suppliers: { some: { supplierId } } }, include: { product: { select: { name: true } } }, orderBy: [{ name: "asc" }, { brand: "asc" }] }), rate(db, roomId, date)]); return { products: rows.map((item) => ({ id: item.id, productId: item.productId, name: item.product.name, brand: item.brand, defaultPrice: item.defaultPrice.toFixed(2), currency: item.currency, expiryDate: item.expiryDate ? day(item.expiryDate) : "", currentQuantity: item.currentQuantity.toFixed(3) })), effectiveRate }; },
     async getInventoryAnalytics(input, roomId) {
       const base = await baseCurrency(db, roomId);
       const whereFor = (from: string, to: string): Prisma.PurchaseInvoiceWhereInput => ({ roomId,
         date: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${to}T00:00:00Z`) }, paymentType: { in: input.paymentTypes },
         ...(input.supplierId ? { supplierId: input.supplierId } : {}),
-        ...(input.productId || input.brand ? { lines: { some: { ...(input.productId ? { itemId: input.productId } : {}), ...(input.brand ? { brand: input.brand } : {}) } } } : {}),
+        ...(input.productId || input.brand ? { lines: { some: { ...(input.productId ? { item: { productId: input.productId } } : {}), ...(input.brand ? { brand: input.brand } : {}) } } } : {}),
       });
-      const [currentRows, comparisonRows, supplierOptions, productOptions] = await Promise.all([
+      const [currentRows, comparisonRows, supplierOptions, productOptions, stockItems] = await Promise.all([
         db.purchaseInvoice.findMany({ where: whereFor(input.from, input.to), include: invoiceInclude }),
         input.compareFrom && input.compareTo ? db.purchaseInvoice.findMany({ where: whereFor(input.compareFrom, input.compareTo), include: invoiceInclude }) : Promise.resolve([]),
         db.supplier.findMany({ where: { roomId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-        db.supplyItem.findMany({ where: { roomId }, select: { id: true, name: true, brand: true }, orderBy: [{ name: "asc" }, { brand: "asc" }] }),
+        db.supplyProduct.findMany({ where: { roomId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+        db.supplyItem.findMany({ where: { roomId, ...(input.productId ? { productId: input.productId } : {}), ...(input.brand ? { brand: input.brand } : {}), ...(input.supplierId ? { suppliers: { some: { supplierId: input.supplierId } } } : {}) }, include: { product: { select: { name: true } }, suppliers: { include: { supplier: { select: { name: true } } } } }, orderBy: [{ name: "asc" }, { brand: "asc" }] }),
       ]);
       const [current, compared] = await Promise.all([Promise.all(currentRows.map((row) => publicInvoice(row, base))), Promise.all(comparisonRows.map((row) => publicInvoice(row, base)))]);
       const cents = (rows: PurchaseInvoice[]) => rows.reduce((sum, row) => sum + moneyCents(row.baseTotal), 0n);
@@ -120,12 +121,15 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
       const currentBuckets = grouped(current), compareBuckets = grouped(compared);
       const keys = input.period === "monthly" ? Array.from({ length: new Date(Date.UTC(+input.from.slice(0,4), +input.from.slice(5,7), 0)).getUTCDate() }, (_, i) => String(i + 1).padStart(2, "0")) : input.period === "yearly" ? Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")) : [...new Set([...currentBuckets.keys(), ...compareBuckets.keys()])].sort();
       const supplierMap = new Map<number, { name: string; total: bigint; count: number }>(); const paymentMap = new Map<PurchaseInvoice["paymentType"], { total: bigint; count: number }>();
-      const productMap = new Map<number, { name: string; brand: string; total: bigint; quantity: Prisma.Decimal }>();
+      const itemMap = new Map(stockItems.map((item) => [item.id, item]));
+      const allReferencedItems = await db.supplyItem.findMany({ where: { roomId, id: { in: [...new Set(current.flatMap((invoice) => invoice.lines.map((line) => line.itemId)))] } }, include: { product: { select: { name: true } } } });
+      for (const item of allReferencedItems) itemMap.set(item.id, item as typeof stockItems[number]);
+      const productMap = new Map<number, { name: string; brands: Set<string>; total: bigint; quantity: Prisma.Decimal }>();
       for (const invoice of current) {
         const supplier = supplierMap.get(invoice.supplierId) ?? { name: invoice.supplierName, total: 0n, count: 0 }; supplier.total += moneyCents(invoice.baseTotal); supplier.count++; supplierMap.set(invoice.supplierId, supplier);
         const payment = paymentMap.get(invoice.paymentType) ?? { total: 0n, count: 0 }; payment.total += moneyCents(invoice.baseTotal); payment.count++; paymentMap.set(invoice.paymentType, payment);
         const originalCents = moneyCents(invoice.totalAmount), baseCents = moneyCents(invoice.baseTotal);
-        for (const line of invoice.lines) { if (input.productId && line.itemId !== input.productId || input.brand && line.brand !== input.brand) continue; const item = productMap.get(line.itemId) ?? { name: line.itemName, brand: line.brand, total: 0n, quantity: new Prisma.Decimal(0) }; item.total += originalCents ? moneyCents(line.lineTotal) * baseCents / originalCents : 0n; item.quantity = item.quantity.plus(line.quantity); productMap.set(line.itemId, item); }
+        for (const line of invoice.lines) { const variant = itemMap.get(line.itemId); if (!variant || input.productId && variant.productId !== input.productId || input.brand && line.brand !== input.brand) continue; const item = productMap.get(variant.productId) ?? { name: variant.product.name, brands: new Set<string>(), total: 0n, quantity: new Prisma.Decimal(0) }; item.brands.add(line.brand); item.total += originalCents ? moneyCents(line.lineTotal) * baseCents / originalCents : 0n; item.quantity = item.quantity.plus(line.quantity); productMap.set(variant.productId, item); }
       }
       const sortValue = (row: PurchaseInvoice): string | bigint => input.sort === "baseTotal" ? moneyCents(row.baseTotal) : input.sort === "invoiceNumber" ? row.invoiceNumber : row[input.sort];
       const sorted = [...current].sort((a,b) => { const left=sortValue(a), right=sortValue(b); const order=left<right?-1:left>right?1:0; return (input.direction === "asc" ? order : -order) || b.id-a.id; });
@@ -134,9 +138,10 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
         comparison: input.compareFrom && input.compareTo ? { ...comparisonSummary, from: input.compareFrom, to: input.compareTo, changePercent: oldTotal === 0n ? null : ((Number(newTotal-oldTotal)/Number(oldTotal))*100).toFixed(1) } : null,
         buckets: keys.map((key) => ({ key, current: moneyString(currentBuckets.get(key) ?? 0n), comparison: moneyString(compareBuckets.get(key) ?? 0n) })),
         suppliers: [...supplierMap.entries()].map(([supplierId,v]) => ({ supplierId, supplierName:v.name, total:moneyString(v.total), count:v.count })).sort((a,b)=>Number(b.total)-Number(a.total)),
-        products: [...productMap.entries()].map(([productId,v]) => ({ productId, productName:v.name, brand:v.brand, total:moneyString(v.total), quantity:v.quantity.toFixed(3) })).sort((a,b)=>Number(b.total)-Number(a.total)),
+        products: [...productMap.entries()].map(([productId,v]) => ({ productId, productName:v.name, brands:[...v.brands].sort(), total:moneyString(v.total), quantity:v.quantity.toFixed(3) })).sort((a,b)=>Number(b.total)-Number(a.total)),
+        stockProducts: [...stockItems.reduce((map, item) => { const value = map.get(item.productId) ?? { productId: item.productId, productName: item.product.name, totalQuantity: new Prisma.Decimal(0), variants: [] as { itemId: number; brand: string; quantity: string; suppliers: string[] }[] }; value.totalQuantity = value.totalQuantity.plus(item.currentQuantity); value.variants.push({ itemId: item.id, brand: item.brand, quantity: item.currentQuantity.toFixed(3), suppliers: item.suppliers.map((link) => link.supplier.name).sort() }); map.set(item.productId, value); return map; }, new Map<number, { productId: number; productName: string; totalQuantity: Prisma.Decimal; variants: { itemId: number; brand: string; quantity: string; suppliers: string[] }[] }>()).values()].map((value) => ({ ...value, totalQuantity: value.totalQuantity.toFixed(3) })).sort((a,b)=>Number(b.totalQuantity)-Number(a.totalQuantity)),
         paymentTypes: [...paymentMap.entries()].map(([paymentType,v]) => ({ paymentType,total:moneyString(v.total),count:v.count })).sort((a,b)=>Number(b.total)-Number(a.total)),
-        supplierOptions, productOptions, brandOptions:[...new Set(productOptions.map((item)=>item.brand))].sort(), invoices:sorted.slice((input.page-1)*input.pageSize,input.page*input.pageSize), total:sorted.length };
+        supplierOptions, productOptions, brandOptions:[...new Set(stockItems.map((item)=>item.brand))].sort(), invoices:sorted.slice((input.page-1)*input.pageSize,input.page*input.pageSize), total:sorted.length };
     },
   };
 }

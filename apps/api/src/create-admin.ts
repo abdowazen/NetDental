@@ -4,28 +4,40 @@ import { PrismaClient } from "@prisma/client";
 import { hash } from "argon2";
 import { usernameSchema } from "@clinic/shared";
 import { passwordOptions } from "./app.js";
+
 const db = new PrismaClient();
+
 try {
   const username = usernameSchema.parse(
     process.env.ADMIN_USERNAME ?? "administrator",
   );
-  if (await db.user.findUnique({ where: { username } }))
-    throw new Error("Administrator username already exists; no changes made.");
-  const password =
-    process.env.ADMIN_PASSWORD ?? randomBytes(18).toString("base64url");
-  if (password.length < 12 || password.length > 128)
-    throw new Error("Password must contain 12–128 characters.");
-  await db.user.create({
-    data: {
-      username,
-      displayName: "Administrator",
-      role: "ADMIN",
-      passwordHash: await hash(password, passwordOptions),
-    },
-  });
-  console.log(`Administrator created: ${username}`);
-  if (!process.env.ADMIN_PASSWORD)
-    console.log(`Generated password: ${password}`);
+  const existing = await db.user.findUnique({ where: { username } });
+
+  if (existing) {
+    if (process.env.ADMIN_IF_MISSING === "true") {
+      console.log(`Administrator already exists: ${username}`);
+      process.exitCode = 0;
+    } else {
+      throw new Error("Administrator username already exists; no changes made.");
+    }
+  } else {
+    const password =
+      process.env.ADMIN_PASSWORD ?? randomBytes(18).toString("base64url");
+    if (password.length < 12 || password.length > 128)
+      throw new Error("Password must contain 12-128 characters.");
+
+    await db.user.create({
+      data: {
+        username,
+        displayName: "Administrator",
+        role: "ADMIN",
+        passwordHash: await hash(password, passwordOptions),
+      },
+    });
+    console.log(`Administrator created: ${username}`);
+    if (!process.env.ADMIN_PASSWORD)
+      console.log(`Generated password: ${password}`);
+  }
 } catch (error) {
   console.error(
     error instanceof Error && error.constructor === Error
