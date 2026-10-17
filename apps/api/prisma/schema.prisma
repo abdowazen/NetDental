@@ -76,6 +76,9 @@ model CurrencySettings {
   id Int @id @default(1)
   baseCurrency Currency @default(USD)
   updatedAt DateTime @updatedAt
+  @@index([roomId, fullName, id])
+  @@index([roomId, phone, id])
+  @@index([roomId, firstVisit, id])
 }
 
 model ExchangeRate {
@@ -432,6 +435,7 @@ model ClinicalRecord {
   voidDate DateTime? @db.Date
   voidActorId String?
   @@index([patientId, kind, date])
+  @@index([patientId, kind, recordedAt])
 }
 
 model Treatment {
@@ -463,6 +467,7 @@ model Treatment {
   labRequest LabRequest?
   createdAt DateTime @default(now())
   @@index([patientId, date])
+  @@index([patientId, planId, createdAt])
   @@index([laboratoryId])
 }
 

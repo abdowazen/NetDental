@@ -58,6 +58,7 @@ export function patientStore(db: PrismaClient): PatientStore {
         pageSize = 30,
         sort = "id",
         direction = "desc",
+        includeTotal = true,
       },
       roomId,
     ) {
@@ -69,10 +70,11 @@ export function patientStore(db: PrismaClient): PatientStore {
       const phoneMatch = digits
         ? Prisma.sql`regexp_replace("phone", '[^0-9]', '', 'g') LIKE ${`%${digits}%`}`
         : Prisma.sql`FALSE`;
+      const numericId = /^\d+$/.test(q) && Number(q) <= 2147483647 ? Number(q) : null;
       const filter = Prisma.sql`"roomId" = ${roomId} AND ${cursor ? Prisma.sql`"id" < ${cursor}` : Prisma.sql`TRUE`}
         AND ${from ? Prisma.sql`"firstVisit" >= ${from}::date` : Prisma.sql`TRUE`}
         AND ${to ? Prisma.sql`"firstVisit" <= ${to}::date` : Prisma.sql`TRUE`}
-        AND ${q ? Prisma.sql`("fullName" ILIKE ${pattern} OR "phone" ILIKE ${pattern} OR "id"::text LIKE ${pattern} OR ${phoneMatch})` : Prisma.sql`TRUE`}`;
+        AND ${q ? Prisma.sql`("fullName" ILIKE ${pattern} OR "phone" ILIKE ${pattern} OR ${numericId === null ? Prisma.sql`FALSE` : Prisma.sql`"id" = ${numericId}`} OR ${phoneMatch})` : Prisma.sql`TRUE`}`;
       const columns = {
         id: Prisma.sql`"id"`,
         fullName: Prisma.sql`lower("fullName")`,
@@ -81,20 +83,21 @@ export function patientStore(db: PrismaClient): PatientStore {
         firstVisit: Prisma.sql`"firstVisit"`,
       };
       const order = direction === "asc" ? Prisma.sql`ASC` : Prisma.sql`DESC`;
-      const [counts, rows] = await db.$transaction([
-        db.$queryRaw<{ total: bigint }[]>(
-          Prisma.sql`SELECT count(*) AS total FROM "Patient" WHERE ${filter}`,
-        ),
-        db.$queryRaw<
+      const rowQuery = db.$queryRaw<
           (Omit<Row, "firstVisit"> & { firstVisit: Date })[]
         >(Prisma.sql`
         SELECT * FROM "Patient"
         WHERE ${filter}
         ORDER BY ${columns[sort]} ${order}, "id" ${order} LIMIT ${pageSize + 1} OFFSET ${(page - 1) * pageSize}
-      `),
-      ]);
+      `);
+      const [counts, rows] = includeTotal
+        ? await db.$transaction([
+            db.$queryRaw<{ total: bigint }[]>(Prisma.sql`SELECT count(*) AS total FROM "Patient" WHERE ${filter}`),
+            rowQuery,
+          ])
+        : [[], await rowQuery] as const;
       return {
-        total: Number(counts[0].total),
+        total: includeTotal ? Number(counts[0]?.total ?? 0) : Math.min(rows.length, pageSize + 1),
         patients: rows.slice(0, pageSize).map(publicPatient),
         nextCursor: rows.length > pageSize ? rows[pageSize - 1].id : null,
       };

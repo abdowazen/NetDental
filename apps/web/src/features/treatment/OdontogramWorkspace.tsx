@@ -38,9 +38,10 @@ export default function OdontogramWorkspace({ patientId, historyOnly = false, sh
   const { t } = useTranslation();
   const { roomId } = useWorkspace();
   const query = useQuery({
-    queryKey: ["odontogram", roomId, patientId],
+    queryKey: ["odontogram", roomId, patientId, showHistory ? "history" : "current"],
     enabled: !!patientId,
-    queryFn: ({ signal }) => api<ChartData>(`/api/odontogram/${patientId}`, { signal }),
+    staleTime: 15_000,
+    queryFn: ({ signal }) => api<ChartData>(`/api/odontogram/${patientId}${showHistory ? "?history=true" : ""}`, { signal }),
   });
   if (!patientId) return <ClinicalChart key="preview" patientId={null} data={{ dentition: null, toothEvents: [], findings: [], treatments: [] }} historyOnly={historyOnly} showHistory={showHistory} onNavigate={onNavigate} />;
   if (query.error) return <><ErrorMessage message={t(errorKey(query.error))} /><Button onClick={() => void query.refetch()}>{t("retry")}</Button></>;

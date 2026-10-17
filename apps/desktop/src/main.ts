@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  net,
   shell,
   utilityProcess,
   type UtilityProcess,
@@ -76,7 +77,10 @@ function startApi() {
   });
 }
 async function ready() {
-  const response = await fetch(`${target}/health`, {
+  // Electron's network stack uses the operating-system certificate store.
+  // Workstations trust the clinic's locally generated Caddy root certificate
+  // during installation, while Node's built-in fetch may ignore that trust.
+  const response = await net.fetch(`${target}/health`, {
     signal: AbortSignal.timeout(1500),
     redirect: "error",
   });

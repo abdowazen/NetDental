@@ -69,6 +69,7 @@ export const patientSearchSchema = z
     sort: z.enum(["id", "fullName", "phone", "gender", "firstVisit"]).optional(),
     direction: z.enum(["asc", "desc"]).optional(),
     cursor: z.coerce.number().int().positive().max(2147483647).optional(),
+    includeTotal: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
   })
   .strict();
 export type PatientSearch = z.infer<typeof patientSearchSchema>;

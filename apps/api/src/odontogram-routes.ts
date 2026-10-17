@@ -49,7 +49,8 @@ export function registerOdontogram(app: FastifyInstance, store: OdontogramStore,
   });
   app.get("/api/odontogram/:patientId", async (req) => {
     const { roomId } = await scope(req, "view");
-    return store.getChart(params.parse(req.params).patientId, roomId);
+    const { history } = z.object({ history: z.enum(["true", "false"]).default("false") }).strict().parse(req.query);
+    return store.getChart(params.parse(req.params).patientId, roomId, history === "true");
   });
   app.put("/api/odontogram/:patientId/config", async (req, reply) => {
     const { roomId } = await scope(req, "modify");

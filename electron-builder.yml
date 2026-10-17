@@ -21,6 +21,7 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   installerHeaderIcon: build/icon.ico
+  shortcutName: NetDenty
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

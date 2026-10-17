@@ -66,6 +66,8 @@ if (!(await stat(applicationIcon).catch(() => null)))
   throw new Error("The NetDenty Windows icon is missing from build/icon.ico.");
 const nsisFile = (value) => value.replaceAll("/", "\\");
 const nsis = `Unicode true
+!include "nsDialogs.nsh"
+!include "LogicLib.nsh"
 Name "NetDenty Server"
 Caption "NetDenty Server Setup"
 OutFile "${nsisFile(serverExe)}"
@@ -74,7 +76,74 @@ WindowIcon on
 RequestExecutionLevel admin
 SetCompress off
 ShowInstDetails show
+Var ClinicName
+Var AdminPassword
+Var ClinicNameInput
+Var AdminPasswordInput
+Var ShowPasswordCheck
+
+Page custom ServerOptionsPage ServerOptionsLeave
 Page instfiles
+
+Function .onInit
+  StrCpy $ClinicName "Main Clinic"
+FunctionEnd
+
+Function ServerOptionsPage
+  nsDialogs::Create 1018
+  Pop $0
+  \${If} $0 == error
+    Abort
+  \${EndIf}
+
+  \${NSD_CreateLabel} 0 0 100% 18u "Configure the first NetDenty administrator"
+  Pop $0
+
+  \${NSD_CreateLabel} 0 28u 100% 12u "Clinic name"
+  Pop $0
+  \${NSD_CreateText} 0 42u 100% 13u "$ClinicName"
+  Pop $ClinicNameInput
+
+  \${NSD_CreateLabel} 0 68u 100% 12u "Administrator username: administrator"
+  Pop $0
+  \${NSD_CreateLabel} 0 91u 100% 12u "Administrator password (12-128 characters)"
+  Pop $0
+  \${NSD_CreatePassword} 0 105u 100% 13u ""
+  Pop $AdminPasswordInput
+  SendMessage $AdminPasswordInput \${EM_SETLIMITTEXT} 128 0
+
+  \${NSD_CreateCheckbox} 0 132u 100% 12u "Show password"
+  Pop $ShowPasswordCheck
+  \${NSD_OnClick} $ShowPasswordCheck TogglePasswordVisibility
+
+  nsDialogs::Show
+FunctionEnd
+
+Function TogglePasswordVisibility
+  \${NSD_GetState} $ShowPasswordCheck $0
+  \${If} $0 == \${BST_CHECKED}
+    SendMessage $AdminPasswordInput \${EM_SETPASSWORDCHAR} 0 0
+  \${Else}
+    SendMessage $AdminPasswordInput \${EM_SETPASSWORDCHAR} 0x25CF 0
+  \${EndIf}
+  System::Call 'user32::InvalidateRect(p $AdminPasswordInput, p 0, i 1)'
+FunctionEnd
+
+Function ServerOptionsLeave
+  \${NSD_GetText} $ClinicNameInput $ClinicName
+  \${NSD_GetText} $AdminPasswordInput $AdminPassword
+  StrLen $0 $ClinicName
+  \${If} $0 == 0
+    MessageBox MB_ICONEXCLAMATION "Enter the clinic name."
+    Abort
+  \${EndIf}
+  StrLen $0 $AdminPassword
+  \${If} $0 < 12
+  \${OrIf} $0 > 128
+    MessageBox MB_ICONEXCLAMATION "The administrator password must contain 12-128 characters."
+    Abort
+  \${EndIf}
+FunctionEnd
 
 Section "Install"
   InitPluginsDir
@@ -82,7 +151,13 @@ Section "Install"
   File "${nsisFile(join(installerStage, "Install-NetDentyServer.ps1"))}"
   File "${nsisFile(payloadArchive)}"
   DetailPrint "Starting NetDenty server setup..."
-  ExecWait '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\\Install-NetDentyServer.ps1"' $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_CLINIC_NAME", "$ClinicName").r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_ADMIN_PASSWORD", "$AdminPassword").r1'
+  nsExec::ExecToLog '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\\Install-NetDentyServer.ps1"'
+  Pop $0
+  System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_ADMIN_PASSWORD", 0).r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_CLINIC_NAME", 0).r1'
+  StrCpy $AdminPassword ""
   IntCmp $0 0 completed failed failed
 failed:
   MessageBox MB_ICONSTOP "NetDenty server setup failed with exit code $0. See C:\\ProgramData\\NetDenty\\Server\\logs\\install.log for details."

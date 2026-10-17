@@ -12,7 +12,7 @@ export interface OdontogramStore {
   editTreatment(patientId: number, roomId: number, actorId: string, id: string, input: TreatmentEditInput): Promise<void>;
   savePlanTotal(patientId: number, roomId: number, actorId: string, input: PlanTotalInput): Promise<void>;
   saveUnplannedTotal(patientId: number, roomId: number, actorId: string, input: PlanTotalInput): Promise<void>;
-  getChart(patientId: number, roomId: number): Promise<ChartData>;
+  getChart(patientId: number, roomId: number, includeHistory?: boolean): Promise<ChartData>;
   saveDentition(patientId: number, roomId: number, dentition: Dentition): Promise<void>;
   addClinicalRecord(patientId: number, roomId: number, actorId: string, kind: "tooth" | "finding", input: ToothEventInput | FindingInput): Promise<void>;
   voidClinicalRecord(patientId: number, roomId: number, actorId: string, id: string, input: VoidInput): Promise<void>;
@@ -58,14 +58,17 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
       if ((previous?.id ?? null) !== expectedPlanId) throw new AccessError("CONFLICT");
       await tx.treatmentPlan.create({ data: { patientId, number: (previous?.number ?? 0) + 1, actorId } });
     }),
-    getChart: (patientId, roomId) => scoped(patientId, roomId, async (tx) => {
+    getChart: (patientId, roomId, includeHistory = false) => scoped(patientId, roomId, async (tx) => {
       const plan = await currentPlan(tx, patientId);
       const today = clinicDate();
+      const treatmentWhere: Prisma.TreatmentWhereInput = includeHistory
+        ? { patientId }
+        : { patientId, OR: [{ planId: plan?.id ?? "00000000-0000-0000-0000-000000000000" }, { planId: null }] };
       const [config, clinical, treatments, plans, currencySettings, exchangeRates] = await Promise.all([
         tx.patientChart.findUnique({ where: { patientId } }),
         tx.clinicalRecord.findMany({ where: { patientId }, orderBy: [{ date: "desc" }, { recordedAt: "desc" }] }),
-        tx.treatment.findMany({ where: { patientId }, include: { procedure: { select: { category: true } }, teeth: true, events: { orderBy: { recordedAt: "asc" } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
-        tx.treatmentPlan.findMany({ where: { patientId }, orderBy: { number: "desc" } }),
+        tx.treatment.findMany({ where: treatmentWhere, include: { procedure: { select: { category: true } }, teeth: true, events: { orderBy: { recordedAt: "asc" } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
+        includeHistory ? tx.treatmentPlan.findMany({ where: { patientId }, orderBy: { number: "desc" } }) : plan ? [plan] : [],
         tx.currencySettings.findUnique({ where: { id: roomId } }),
         tx.exchangeRate.findMany({ where: { roomId, date: { gte: date(`${today.slice(0, 4)}-01-01`), lte: date(today) } }, orderBy: { date: "desc" } }),
       ]);
@@ -94,7 +97,7 @@ export function odontogramStore(db: PrismaClient): OdontogramStore {
         findings: clinical.filter((r) => r.kind === "finding").map((r) => ({ ...findingSchema.parse(r.data), ...audit(r) })) as Finding[],
         treatments: mapped.filter((row) => row.planId === plan?.id),
         sessions: mapped.filter((row) => row.planId === plan?.id || row.planId === null),
-        historyTreatments: mapped,
+        historyTreatments: includeHistory ? mapped : undefined,
         plans: plans.map((row) => ({ id: row.id, number: row.number, createdAt: row.createdAt.toISOString() })),
 
       };

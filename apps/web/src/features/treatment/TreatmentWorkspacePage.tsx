@@ -28,6 +28,7 @@ export function TreatmentWorkspacePage() {
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [patientId, setPatientId] = useState(searchParams.get("patientId") ?? "");
+  const [selectedPatient, setSelectedPatient] = useState<Pick<Patient, "id" | "fileId" | "fullName" | "phone"> | null>(null);
   const [patientOpen, setPatientOpen] = useState(false);
   const [activeOption, setActiveOption] = useState(-1);
   const canReadPatients = allowed(user, "patients");
@@ -38,18 +39,22 @@ export function TreatmentWorkspacePage() {
   const patients = useQuery({
     queryKey: ["patients", "treatment-search", roomId, debounced],
     enabled: canReadPatients && patientOpen,
-    queryFn: ({ signal }) => api<PatientList>(`/api/patients?${new URLSearchParams({ q: debounced, pageSize: "30", sort: "fullName", direction: "asc" })}`, { signal }),
+    staleTime: 30_000,
+    queryFn: ({ signal }) => api<PatientList>(`/api/patients?${new URLSearchParams({ q: debounced, pageSize: "20", sort: "fullName", direction: "asc", includeTotal: "false" })}`, { signal }),
   });
   const detail = useQuery({
     queryKey: ["patients", "detail", roomId, patientId],
-    enabled: canReadPatients && !!patientId,
+    enabled: canReadPatients && !!patientId && selectedPatient?.id !== Number(patientId),
+    staleTime: 60_000,
     queryFn: ({ signal }) => api<{ patient: Patient }>(`/api/patients/${patientId}`, { signal }),
   });
-  const patient = canReadPatients ? detail.data?.patient : undefined;
+  const patient = canReadPatients ? selectedPatient?.id === Number(patientId) ? selectedPatient : detail.data?.patient : undefined;
+  const activePatientId = patientId && Number.isInteger(Number(patientId)) ? Number(patientId) : undefined;
   const rows = patients.data?.patients ?? [];
   const searching = search.trim() !== debounced || patients.isFetching;
   function choosePatient(row: Patient) {
     setPatientId(String(row.id));
+    setSelectedPatient({ id: row.id, fileId: row.fileId, fullName: row.fullName, phone: row.phone });
     setSearch("");
     setPatientOpen(false);
     setActiveOption(-1);
@@ -100,7 +105,7 @@ export function TreatmentWorkspacePage() {
               </ul>
               <div role="status" className="text-xs text-muted">
                 {searching ? <p className="px-3 py-2">{t("loading")}</p> : patients.data?.total === 0 ? <p className="px-3 py-2">{t("patientEmpty")}</p> : null}
-                {!searching && patients.data && patients.data.total > 30 && <p className="border-t border-line px-3 py-2">{t("twRefineSearch")}</p>}
+                {!searching && patients.data?.nextCursor && <p className="border-t border-line px-3 py-2">{t("twRefineSearch")}</p>}
               </div>
             </div>}
           </div>
@@ -115,7 +120,7 @@ export function TreatmentWorkspacePage() {
       {tabs.map((value, index) => <button key={value} id={`treatment-tab-${value}`} type="button" role="tab" aria-selected={tab === value} aria-controls={`treatment-panel-${value}`} tabIndex={tab === value ? 0 : -1} onKeyDown={(event) => onTabKey(event, index)} onClick={() => changeTab(value)} className={`shrink-0 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${tab === value ? "border-accent-solid text-accent-ink" : "border-transparent text-muted hover:text-ink"}`}>{t(`twTab_${value}`)}</button>)}
     </div>
     <section id={`treatment-panel-${tab}`} role="tabpanel" aria-labelledby={`treatment-tab-${tab}`} tabIndex={0}>
-      {tab === "plan" || tab === "session" || tab === "history" ? <ChartWorkspaceBoundary key={patient?.id ?? "preview"}><Suspense fallback={<p>{t("loading")}</p>}><OdontogramWorkspace key={patient?.id ?? "preview"} patientId={patient?.id} historyOnly={tab !== "plan"} showHistory={tab === "history"} onNavigate={changeTab} /></Suspense></ChartWorkspaceBoundary> : tab === "payments" ? <PaymentsWorkspace patientId={patient?.id} patientName={patient?.fullName} /> : tab === "laboratory" ? <LaboratoryWorkspace patientId={patient?.id} patientName={patient?.fullName} /> : tab === "files" ? <XrayFilesWorkspace patientId={patient?.id} patientName={patient?.fullName}/> : <WorkspaceEmpty tab={tab} />}
+      {tab === "plan" || tab === "session" || tab === "history" ? <ChartWorkspaceBoundary key={activePatientId ?? "preview"}><Suspense fallback={<p>{t("loading")}</p>}><OdontogramWorkspace key={`${activePatientId ?? "preview"}-${tab === "history" ? "history" : "current"}`} patientId={activePatientId} historyOnly={tab !== "plan"} showHistory={tab === "history"} onNavigate={changeTab} /></Suspense></ChartWorkspaceBoundary> : tab === "payments" ? <PaymentsWorkspace patientId={activePatientId} patientName={patient?.fullName} /> : tab === "laboratory" ? <LaboratoryWorkspace patientId={activePatientId} patientName={patient?.fullName} /> : tab === "files" ? <XrayFilesWorkspace patientId={activePatientId} patientName={patient?.fullName}/> : <WorkspaceEmpty tab={tab} />}
     </section>
   </div>;
 }

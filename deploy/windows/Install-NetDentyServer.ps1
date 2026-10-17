@@ -11,6 +11,15 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+# The graphical installer passes these values through the child-process
+# environment so secrets never appear in the process command line.
+if ($env:NETDENTY_INSTALL_CLINIC_NAME) {
+  $ClinicName = $env:NETDENTY_INSTALL_CLINIC_NAME
+}
+if ($env:NETDENTY_INSTALL_ADMIN_PASSWORD) {
+  $AdministratorPassword = $env:NETDENTY_INSTALL_ADMIN_PASSWORD
+}
+
 function Test-Administrator {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = New-Object Security.Principal.WindowsPrincipal -ArgumentList $identity
@@ -49,6 +58,36 @@ function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$Failur
   if ($exitCode -ne 0) { throw "$FailureMessage (exit code $exitCode)." }
 }
 
+function Find-PostgresPsql {
+  $candidatePaths = New-Object System.Collections.Generic.List[string]
+  $programRoots = @(
+    $env:ProgramW6432,
+    $env:ProgramFiles,
+    ${env:ProgramFiles(x86)}
+  ) | Where-Object { $_ } | Select-Object -Unique
+  foreach ($root in $programRoots) {
+    Get-ChildItem (Join-Path $root "PostgreSQL\*\bin\psql.exe") -ErrorAction SilentlyContinue |
+      ForEach-Object { [void]$candidatePaths.Add($_.FullName) }
+  }
+  foreach ($registryRoot in @(
+    "HKLM:\SOFTWARE\PostgreSQL\Installations",
+    "HKLM:\SOFTWARE\WOW6432Node\PostgreSQL\Installations"
+  )) {
+    Get-ChildItem $registryRoot -ErrorAction SilentlyContinue | ForEach-Object {
+      $properties = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+      $baseDirectory = $properties.'Base Directory'
+      if ($baseDirectory) {
+        [void]$candidatePaths.Add((Join-Path $baseDirectory "bin\psql.exe"))
+      }
+    }
+  }
+  $candidatePaths |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Sort-Object -Unique -Descending |
+    Select-Object -First 1 |
+    ForEach-Object { Get-Item -LiteralPath $_ }
+}
+
 if ($AdministratorUsername -notmatch '^[a-z0-9._-]{3,64}$') {
   throw "Administrator username must contain 3-64 lowercase letters, digits, periods, underscores or hyphens."
 }
@@ -72,10 +111,12 @@ $dataRoot = Join-Path $InstallRoot "data"
 $logRoot = Join-Path $InstallRoot "logs"
 $patientFiles = Join-Path $dataRoot "patient-files"
 $workstationKit = Join-Path $InstallRoot "Workstation Installer"
+$postgresBootstrapSecret = Join-Path $dataRoot "postgres-bootstrap.secret"
 $apiTaskName = "NetDenty API"
 $proxyTaskName = "NetDenty HTTPS"
 $installLog = Join-Path $logRoot "install.log"
 $transcriptStarted = $false
+$existingDatabaseUrl = $null
 
 try {
   Write-Host "Preparing NetDenty server files..."
@@ -90,17 +131,48 @@ try {
   $tar = Join-Path $env:SystemRoot "System32\tar.exe"
   if (-not (Test-Path -LiteralPath $tar)) { throw "Windows tar.exe is not available." }
   Invoke-Checked $tar @("-xf", $payloadArchive, "-C", $staging) "Server payload extraction failed"
+  $existingEnvironmentPath = Join-Path $runtimeRoot "api\.env"
+  if (Test-Path -LiteralPath $existingEnvironmentPath) {
+    $existingDatabaseLine = Get-Content -LiteralPath $existingEnvironmentPath |
+      Where-Object { $_ -like "DATABASE_URL=*" } |
+      Select-Object -First 1
+    if ($existingDatabaseLine) {
+      $candidateDatabaseUrl = $existingDatabaseLine.Substring("DATABASE_URL=".Length)
+      $candidateDatabaseUri = $null
+      if (
+        [Uri]::TryCreate($candidateDatabaseUrl, [UriKind]::Absolute, [ref]$candidateDatabaseUri) -and
+        $candidateDatabaseUri.Scheme -in @("postgres", "postgresql") -and
+        $candidateDatabaseUri.UserInfo
+      ) {
+        $existingDatabaseUrl = $candidateDatabaseUrl
+        Write-Host "Existing NetDenty database configuration found; it will be preserved for this upgrade."
+      } else {
+        throw "The installed NetDenty DATABASE_URL is invalid. The runtime was not replaced."
+      }
+    }
+  }
   if (Test-Path -LiteralPath $runtimeRoot) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force }
   Copy-Item -LiteralPath (Join-Path $staging "runtime") -Destination $runtimeRoot -Recurse -Force
 
   $postgresInstaller = Get-ChildItem -LiteralPath (Join-Path $staging "vendor") -Filter "postgresql-*-windows-x64.exe" | Select-Object -First 1
-  $psql = Get-ChildItem "$env:ProgramFiles\PostgreSQL\*\bin\psql.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
-  $postgresSuperPassword = New-DeploymentPassword
+  # NSIS is a 32-bit process, so a child PowerShell can expose ProgramFiles as
+  # Program Files (x86). ProgramW6432 always identifies the native x64 folder.
+  $programFiles64 = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+  $psql = Find-PostgresPsql
+  $postgresSuperPassword = $null
   if (-not $psql) {
+    if ($existingDatabaseUrl) {
+      throw "An existing NetDenty database configuration was found, but PostgreSQL command-line tools are unavailable. Repair PostgreSQL before upgrading."
+    }
     if (-not $postgresInstaller) { throw "The bundled PostgreSQL installer is missing." }
     Write-Host "Installing PostgreSQL..."
-    $postgresPrefix = Join-Path $env:ProgramFiles "PostgreSQL\18"
+    $postgresSuperPassword = New-DeploymentPassword
+    $postgresPrefix = Join-Path $programFiles64 "PostgreSQL\18"
     $postgresData = Join-Path $env:ProgramData "PostgreSQL\18\data"
+    # Retain the generated bootstrap credential only until the complete setup
+    # succeeds. This allows a retry if a later installation step fails.
+    $postgresSuperPassword | Set-Content -LiteralPath $postgresBootstrapSecret -Encoding ASCII -NoNewline
+    & icacls.exe $postgresBootstrapSecret /inheritance:r /grant:r "SYSTEM:(F)" "Administrators:(F)" | Out-Null
     Invoke-Checked $postgresInstaller.FullName @(
       "--mode", "unattended", "--unattendedmodeui", "minimal",
       "--prefix", $postgresPrefix, "--datadir", $postgresData,
@@ -108,16 +180,66 @@ try {
       "--superpassword", $postgresSuperPassword, "--servicepassword", $postgresSuperPassword,
       "--enable-components", "server,commandlinetools", "--create_shortcuts", "0"
     ) "PostgreSQL installation failed"
-    $psql = Get-Item (Join-Path $postgresPrefix "bin\psql.exe")
+    $discoveryDeadline = (Get-Date).AddSeconds(60)
+    do {
+      $psql = Find-PostgresPsql
+      if (-not $psql) { Start-Sleep -Seconds 2 }
+    } until ($psql -or (Get-Date) -ge $discoveryDeadline)
+    if (-not $psql) {
+      throw "PostgreSQL installation completed but psql.exe was not registered or found in a PostgreSQL bin directory."
+    }
+    Write-Host "PostgreSQL command-line tools found at $($psql.Directory.FullName)."
   } else {
     Write-Host "Using the installed PostgreSQL instance at $($psql.Directory.Parent.FullName)."
-    $postgresSuperPassword = Read-PlainPassword "Enter the existing PostgreSQL postgres-account password"
+    if ($existingDatabaseUrl) {
+      Write-Host "Using the installed NetDenty database credential for the upgrade."
+    } elseif (Test-Path -LiteralPath $postgresBootstrapSecret) {
+      $postgresSuperPassword = Get-Content -Raw -LiteralPath $postgresBootstrapSecret
+      Write-Host "Continuing the previous NetDenty PostgreSQL setup attempt."
+    } else {
+      $postgresSuperPassword = Read-PlainPassword "Enter the existing PostgreSQL postgres-account password"
+    }
   }
 
-  $dbPassword = New-DeploymentPassword
+  $postgresService = Get-Service -Name "postgresql-netdenty" -ErrorAction SilentlyContinue
+  if (-not $postgresService) {
+    $postgresService = Get-Service -Name "postgresql*" -ErrorAction SilentlyContinue |
+      Sort-Object Name -Descending |
+      Select-Object -First 1
+  }
+  if ($postgresService -and $postgresService.Status -ne "Running") {
+    Write-Host "Starting PostgreSQL service $($postgresService.Name)..."
+    Start-Service -Name $postgresService.Name
+  }
+  $pgIsReady = Join-Path $psql.Directory.FullName "pg_isready.exe"
+  if (-not (Test-Path -LiteralPath $pgIsReady)) {
+    throw "PostgreSQL readiness tool was not found beside psql.exe at $($psql.Directory.FullName)."
+  }
+  Write-Host "Waiting for PostgreSQL to accept connections..."
+  $readyDeadline = (Get-Date).AddSeconds(120)
+  $postgresReady = $false
+  do {
+    & $pgIsReady -q -h 127.0.0.1 -p 5432 -d postgres
+    $postgresReady = $LASTEXITCODE -eq 0
+    if (-not $postgresReady) { Start-Sleep -Seconds 2 }
+  } until ($postgresReady -or (Get-Date) -ge $readyDeadline)
+  if (-not $postgresReady) {
+    $serviceState = if ($postgresService) { (Get-Service -Name $postgresService.Name).Status } else { "not found" }
+    throw "PostgreSQL did not accept connections on 127.0.0.1:5432 within 120 seconds. Service state: $serviceState."
+  }
+  Write-Host "PostgreSQL is ready."
+
   $sqlPath = Join-Path $staging "provision.sql"
-  $escapedPassword = $dbPassword.Replace("'", "''")
-  @"
+  if ($existingDatabaseUrl) {
+    $databaseUrl = $existingDatabaseUrl
+    $installedDatabaseUri = [Uri]$databaseUrl
+    $installedCredentials = $installedDatabaseUri.UserInfo.Split(":", 2)
+    if ($installedCredentials.Count -ne 2) { throw "The installed database credential is incomplete." }
+    $dbPassword = [Uri]::UnescapeDataString($installedCredentials[1])
+  } else {
+    $dbPassword = New-DeploymentPassword
+    $escapedPassword = $dbPassword.Replace("'", "''")
+    @"
 SELECT 'CREATE ROLE clinic LOGIN PASSWORD ''$escapedPassword'''
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'clinic')\gexec
 ALTER ROLE clinic WITH LOGIN PASSWORD '$escapedPassword';
@@ -125,16 +247,17 @@ SELECT 'CREATE DATABASE dental_clinic OWNER clinic'
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'dental_clinic')\gexec
 ALTER DATABASE dental_clinic OWNER TO clinic;
 "@ | Set-Content -LiteralPath $sqlPath -Encoding UTF8
-  Write-Host "Creating the NetDenty database..."
-  $env:PGPASSWORD = $postgresSuperPassword
-  try { Invoke-Checked $psql.FullName @("-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", $sqlPath) "Database provisioning failed" }
-  finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+    Write-Host "Creating the NetDenty database..."
+    $env:PGPASSWORD = $postgresSuperPassword
+    try { Invoke-Checked $psql.FullName @("-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", $sqlPath) "Database provisioning failed" }
+    finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+    $encodedDbPassword = [uri]::EscapeDataString($dbPassword)
+    $databaseUrl = "postgresql://clinic:$encodedDbPassword@127.0.0.1:5432/dental_clinic?schema=public"
+  }
 
-  $encodedDbPassword = [uri]::EscapeDataString($dbPassword)
   $apiRoot = Join-Path $runtimeRoot "api"
   $webRoot = Join-Path $runtimeRoot "web"
   $node = Join-Path $runtimeRoot "node.exe"
-  $databaseUrl = "postgresql://clinic:$encodedDbPassword@127.0.0.1:5432/dental_clinic?schema=public"
   $origin = "https://$ServerName"
   $environmentPath = Join-Path $apiRoot ".env"
   @"
@@ -169,6 +292,8 @@ POSTGRES_BIN=$($psql.Directory.FullName)
   finally { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
 
   Write-Host "Registering the NetDenty server startup tasks..."
+  Stop-ScheduledTask -TaskName $apiTaskName -ErrorAction SilentlyContinue
+  Stop-ScheduledTask -TaskName $proxyTaskName -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $apiTaskName -Confirm:$false -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $proxyTaskName -Confirm:$false -ErrorAction SilentlyContinue
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
@@ -180,6 +305,7 @@ POSTGRES_BIN=$($psql.Directory.FullName)
   $caddy = Join-Path $runtimeRoot "caddy.exe"
   if (-not (Test-Path -LiteralPath $caddy)) { throw "The bundled HTTPS proxy is missing." }
   $caddyData = Join-Path $dataRoot "caddy"
+  New-Item -ItemType Directory -Force -Path $caddyData | Out-Null
   $caddyFile = Join-Path $runtimeRoot "Caddyfile"
   @"
 $origin {
@@ -188,13 +314,60 @@ $origin {
   reverse_proxy 127.0.0.1:4310
 }
 "@ | Set-Content -LiteralPath $caddyFile -Encoding ASCII
+  $previousXdgData = $env:XDG_DATA_HOME
+  $previousXdgConfig = $env:XDG_CONFIG_HOME
+  $previousAppData = $env:APPDATA
+  $previousLocalAppData = $env:LOCALAPPDATA
+  $previousHome = $env:HOME
+  $env:XDG_DATA_HOME = $caddyData
+  $env:XDG_CONFIG_HOME = $caddyData
+  $env:APPDATA = $caddyData
+  $env:LOCALAPPDATA = $caddyData
+  $env:HOME = $caddyData
+  try {
+    $previousErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $validationOutput = & $caddy validate --config $caddyFile --adapter caddyfile 2>&1
+    $validationExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorPreference
+    if ($validationExitCode -ne 0) {
+      throw "Caddy configuration validation failed: $($validationOutput -join ' ')"
+    }
+  } finally {
+    if ($previousErrorPreference) { $ErrorActionPreference = $previousErrorPreference }
+    $env:XDG_DATA_HOME = $previousXdgData
+    $env:XDG_CONFIG_HOME = $previousXdgConfig
+    $env:APPDATA = $previousAppData
+    $env:LOCALAPPDATA = $previousLocalAppData
+    $env:HOME = $previousHome
+  }
   $caddyRunner = Join-Path $runtimeRoot "Run-Caddy.ps1"
+  $caddyLog = Join-Path $logRoot "caddy.log"
+  "NetDenty HTTPS task preparation started at $(Get-Date -Format o)." |
+    Set-Content -LiteralPath $caddyLog -Encoding ASCII
   @"
+`$ErrorActionPreference = 'Stop'
 `$env:XDG_DATA_HOME = '$($caddyData.Replace("'", "''"))'
 `$env:XDG_CONFIG_HOME = '$($caddyData.Replace("'", "''"))'
-& '$($caddy.Replace("'", "''"))' run --config '$($caddyFile.Replace("'", "''"))' --adapter caddyfile
+`$env:APPDATA = '$($caddyData.Replace("'", "''"))'
+`$env:LOCALAPPDATA = '$($caddyData.Replace("'", "''"))'
+`$env:HOME = '$($caddyData.Replace("'", "''"))'
+"Caddy runner started at `$([DateTime]::Now.ToString('o')) as `$([Security.Principal.WindowsIdentity]::GetCurrent().Name)." | Add-Content -LiteralPath '$($caddyLog.Replace("'", "''"))' -Encoding ASCII
+try {
+  # Caddy writes structured informational messages to stderr. Windows
+  # PowerShell 5.1 must not promote those messages to terminating errors.
+  `$ErrorActionPreference = 'Continue'
+  & '$($caddy.Replace("'", "''"))' run --config '$($caddyFile.Replace("'", "''"))' --adapter caddyfile *>> '$($caddyLog.Replace("'", "''"))'
+  `$result = `$LASTEXITCODE
+  "Caddy exited with code `$result." | Add-Content -LiteralPath '$($caddyLog.Replace("'", "''"))' -Encoding ASCII
+  exit `$result
+} catch {
+  "Caddy runner error: `$(`$_.Exception.Message)" | Add-Content -LiteralPath '$($caddyLog.Replace("'", "''"))' -Encoding ASCII
+  exit 1
+}
 "@ | Set-Content -LiteralPath $caddyRunner -Encoding UTF8
-  $proxyAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$caddyRunner`"" -WorkingDirectory $runtimeRoot
+  $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $proxyAction = New-ScheduledTaskAction -Execute $windowsPowerShell -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$caddyRunner`"" -WorkingDirectory $runtimeRoot
   Register-ScheduledTask -TaskName $proxyTaskName -Action $proxyAction -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
   if (-not (Get-NetFirewallRule -DisplayName "NetDenty HTTPS" -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName "NetDenty HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -Profile Private,Domain | Out-Null
@@ -202,13 +375,36 @@ $origin {
   Start-ScheduledTask -TaskName $apiTaskName
   Start-Sleep -Seconds 2
   Start-ScheduledTask -TaskName $proxyTaskName
+  Start-Sleep -Seconds 3
+  $proxyTask = Get-ScheduledTask -TaskName $proxyTaskName
+  $proxyTaskInfo = Get-ScheduledTaskInfo -TaskName $proxyTaskName
+  Write-Host "NetDenty HTTPS task state: $($proxyTask.State); result: $($proxyTaskInfo.LastTaskResult)."
+  if ($proxyTask.State -ne "Running") {
+    $startupLog = (Get-Content -LiteralPath $caddyLog -Tail 20 -ErrorAction SilentlyContinue) -join " | "
+    throw "The NetDenty HTTPS task stopped during startup. Result: $($proxyTaskInfo.LastTaskResult). $startupLog"
+  }
 
-  $deadline = (Get-Date).AddSeconds(60)
+  $systemProfileCaddy = Join-Path $env:SystemRoot "System32\config\systemprofile\AppData\Roaming\Caddy"
+  $certificateSearchRoots = @(
+    $caddyData,
+    $systemProfileCaddy,
+    (Join-Path $env:SystemRoot "System32\config\systemprofile\AppData\Local\Caddy")
+  ) | Select-Object -Unique
+  $deadline = (Get-Date).AddSeconds(120)
   do {
     Start-Sleep -Seconds 1
-    $rootCertificate = Get-ChildItem -LiteralPath $caddyData -Filter "root.crt" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $rootCertificate = $certificateSearchRoots |
+      Where-Object { Test-Path -LiteralPath $_ } |
+      ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter "root.crt" -Recurse -ErrorAction SilentlyContinue } |
+      Select-Object -First 1
   } until ($rootCertificate -or (Get-Date) -ge $deadline)
-  if (-not $rootCertificate) { throw "HTTPS certificate creation did not complete. Review the Caddy task log." }
+  if (-not $rootCertificate) {
+    $taskInfo = Get-ScheduledTaskInfo -TaskName $proxyTaskName -ErrorAction SilentlyContinue
+    $logTail = if (Test-Path -LiteralPath $caddyLog) {
+      (Get-Content -LiteralPath $caddyLog -Tail 20 -ErrorAction SilentlyContinue) -join " | "
+    } else { "No Caddy log was created." }
+    throw "HTTPS certificate creation did not complete. Caddy task result: $($taskInfo.LastTaskResult). $logTail"
+  }
   Import-Certificate -FilePath $rootCertificate.FullName -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
 
   Write-Host "Creating the one-click workstation installation kit..."
@@ -229,6 +425,7 @@ $origin {
 
   $health = Invoke-RestMethod -Uri "http://127.0.0.1:4310/health" -TimeoutSec 10
   if ($health.status -ne "ok") { throw "The NetDenty API health check failed." }
+  Remove-Item -LiteralPath $postgresBootstrapSecret -Force -ErrorAction SilentlyContinue
   Write-Host ""
   Write-Host "NetDenty Server installation completed successfully." -ForegroundColor Green
   Write-Host "Server address: $origin"
@@ -240,6 +437,10 @@ $origin {
   exit 1
 } finally {
   $AdministratorPassword = $null
+  $dbPassword = $null
+  $postgresSuperPassword = $null
+  $existingDatabaseUrl = $null
+  Remove-Item Env:NETDENTY_INSTALL_ADMIN_PASSWORD, Env:NETDENTY_INSTALL_CLINIC_NAME -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
   if ($transcriptStarted) { try { Stop-Transcript | Out-Null } catch { } }
 }

@@ -1,5 +1,9 @@
 # NetDenty one-click Windows installers
 
+For the complete clinic installation, update, pgAdmin, backup, and
+troubleshooting procedure, see
+[NetDenty installation, updates, database access, and troubleshooting](netdenty-operations-guide.md).
+
 NetDenty produces two Windows installation packages:
 
 - `NetDenty-Server-Setup.exe` installs the database, server API, HTTPS endpoint, administrator account, patient-file directory, migrations, and a local workstation.
@@ -35,6 +39,9 @@ Sign both EXE files with the publisher's Windows code-signing certificate before
 ## Server installation
 
 Run `NetDenty-Server-Setup.exe` as a Windows administrator on the protected, always-on clinic computer.
+
+The first page asks for the clinic name and the initial `administrator`
+password. Installation progress is then shown in the setup details window.
 
 The installer performs these operations in order:
 
@@ -93,6 +100,17 @@ The workstation never receives `DATABASE_URL` or PostgreSQL credentials. It comm
 ```
 
 The Windows startup tasks are named `NetDenty API` and `NetDenty HTTPS`.
+
+## Recovering from an older failed PostgreSQL installation
+
+An older server installer could resolve the x64 PostgreSQL folder through
+`Program Files (x86)` and stop after PostgreSQL had already been installed. On
+a new laptop with no data to preserve, uninstall that incomplete PostgreSQL 18
+installation from Windows **Installed apps**, restart Windows, verify that no
+`postgresql-netdenty` service remains, and then run the current server setup.
+The current installer uses the native x64 program folder and retains a
+protected temporary bootstrap credential so its own interrupted setup can be
+retried safely.
 
 ## Upgrade behavior
 
