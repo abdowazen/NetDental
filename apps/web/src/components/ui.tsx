@@ -1,10 +1,16 @@
 import {
   forwardRef,
   useId,
+  useState,
   type InputHTMLAttributes,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+declare global {
+  interface Window {
+    netDentyDiagnostics?: { save(): Promise<{ status: string }> };
+  }
+}
 import { useTranslation } from "react-i18next";
 import { WifiOff, LoaderCircle } from "lucide-react";
 export function Brand({ compact = false }: { compact?: boolean }) {
@@ -111,6 +117,17 @@ export function Loading() {
 }
 export function ConnectionScreen({ retry }: { retry: () => void }) {
   const { t, i18n } = useTranslation();
+  const [collecting, setCollecting] = useState(false);
+  const [diagnosticStatus, setDiagnosticStatus] = useState("");
+  const saveDiagnostics = async () => {
+    setCollecting(true);
+    setDiagnosticStatus("collectingDiagnostics");
+    try {
+      const result = await window.netDentyDiagnostics!.save();
+      setDiagnosticStatus(result.status === "saved" ? "diagnosticsSaved" : result.status === "cancelled" ? "diagnosticsCancelled" : "diagnosticsFailed");
+    } catch { setDiagnosticStatus("diagnosticsFailed"); }
+    finally { setCollecting(false); }
+  };
   return (
     <div className="grid min-h-screen place-items-center p-6">
       <section className="card max-w-lg p-10 text-center">
@@ -124,6 +141,7 @@ export function ConnectionScreen({ retry }: { retry: () => void }) {
           {t("connectionDescription")}
         </p>
         <Button onClick={retry}>{t("retry")}</Button>
+        {window.netDentyDiagnostics && <div className="mt-4"><Button disabled={collecting} onClick={() => void saveDiagnostics()}>{t(collecting ? "collectingDiagnostics" : "downloadDiagnostics")}</Button><p className="mt-3 text-sm text-muted" role="status" aria-live="polite">{diagnosticStatus && t(diagnosticStatus)}</p></div>}
         <div className="mt-8">
           <label htmlFor="connection-language" className="mr-3 text-sm">
             {t("language")}

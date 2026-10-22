@@ -48,6 +48,10 @@ pgAdmin 4 is optional and may be installed separately on the server laptop.
 3. Enter the clinic name.
 4. Enter a strong NetDenty administrator password containing 12-128
    characters. Store it in the clinic's protected password record.
+   On the next setup page, enter the existing PostgreSQL `postgres` account
+   password if PostgreSQL was installed separately. Leave it blank for a new
+   bundled PostgreSQL installation or an upgrade with saved NetDenty database
+   credentials. This field is inside the installer, before installation starts.
 5. Let the setup finish without closing its PowerShell or setup window.
 6. Open NetDenty from the desktop shortcut.
 7. Sign in with:
@@ -74,6 +78,31 @@ It also creates the startup tasks `NetDenty API` and `NetDenty HTTPS` and a
 **NetDenty Workstation Installer** folder on the Public Desktop.
 
 ## 4. Verify the server installation
+
+### Installed app and development on the same computer
+
+The current setup supports running both at once:
+
+| Component | Installed app | `npm run dev` |
+| --- | --- | --- |
+| API | Loopback port 4310 | Loopback port 4311 |
+| App address | Configured clinic HTTPS address, port 443 | `http://127.0.0.1:4311` |
+| Profile | `%APPDATA%\Dental Clinic` | Project `.runtime\dev-profile` |
+| Configuration | `C:\ProgramData\NetDenty\desktop.env` and installed API `.env` | Project `.env` plus development launcher settings |
+
+Install or update using `release\NetDenty-Server-Setup.exe` as administrator,
+then launch the installed **NetDenty** shortcut. Run `npm run dev` from the
+project in a separate terminal. The development launcher sets its port, HTTP
+origin, and cookie settings automatically. Do not start a separate
+`npm run api:start` on port 4310 while the installed server is running.
+Server upgrades stop only the installed runtime's tasks/processes before
+replacing their files; they do not stop development Electron.
+
+Both applications use whichever database their respective `.env` specifies.
+If those files point to the same database, changes made in either app are
+shared immediately. Separate ports and profiles do not create separate
+databases. Use a separate development database for experiments that must not
+change installed clinic data. Close both apps during database schema upgrades.
 
 Open PowerShell as administrator and run:
 
@@ -186,6 +215,37 @@ SSL mode: Prefer
 Tables are under **Databases → dental_clinic → Schemas → public → Tables**.
 Use pgAdmin for inspection, controlled backups, and reviewed maintenance.
 Editing rows manually bypasses NetDenty validation and audit behavior.
+
+### Inventory units (database-maintained list)
+
+Item creation and editing use the shared `public."Unit"` table for the Unit
+dropdown. The inventory-units migration supplies 44 common dental inventory
+units, including pieces, pairs, packs, boxes, kits, syringes, cartridges,
+compules, capsules, bottles, rolls, and metric weight, volume, length, and area
+units. Existing items default to Piece; review their unit when editing them.
+Prices, opening balances, and stock quantities refer to the chosen unit.
+There is no automatic conversion between a box, a piece, or metric units.
+
+To add a unit in pgAdmin on the server after deploying this migration:
+
+```sql
+INSERT INTO public."Unit" ("name", "symbol")
+VALUES ('Dental dispenser', 'dispenser')
+ON CONFLICT ("name") DO NOTHING;
+
+SELECT "id", "name", "symbol" FROM public."Unit" ORDER BY "name";
+```
+
+Let PostgreSQL generate the ID. Reopen or refocus the item form to refresh the
+list. Units are shared across rooms, preserved by the data-reset scripts, and
+cannot be deleted while referenced by items. Keep Piece (ID 1) for existing
+items and compatibility with older clients. Changing an item's unit does not
+convert its existing quantities or purchase history; use the unit that matches
+those quantities.
+
+Deploy the database migration together with the updated API and web app using
+the schema-change update procedure below. Source changes alone do not update
+an already installed clinic server.
 
 ## 8. Back up before every update
 
@@ -304,6 +364,88 @@ Never use a generic production data-fix script without clinic-specific review.
 
 ## 10. Troubleshoot an installation
 
+### One script: check readiness and investigate the Try connect page
+
+In the desktop app, the connection page also offers **Download diagnostic
+log**. Select it to check API/database health, application HTML, the local API
+entry and environment files, the owned API's last exit code, Windows
+PostgreSQL services, startup tasks, processes, and listening ports. In LOCAL
+mode it attempts an independent authenticated database query and checks for
+failed migrations and the inventory Unit table, even if the API did not start.
+Choose where to save the `.txt` report in the Save dialog. Collection has
+timeouts; denied checks are recorded without stopping the remaining checks.
+It does not restart services, change data, or include passwords/patient data.
+Server tasks can be absent normally in development. REMOTE workstations use
+the API health endpoint to check database health; direct server checks still
+require the server-side script below. This button is available in the desktop
+app, including its built-in offline page, without a working API.
+
+From a copy of the project support scripts, open **Windows PowerShell as
+administrator on the server laptop** and run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Test-NetDentyReadiness.ps1
+```
+
+The script prints a PASS/FAIL result and a suggested investigation for each
+check. It checks the installed `node.exe` running the installed `server.mjs`
+(not an unrelated Node process), runtime files, both startup tasks,
+PostgreSQL service, an authenticated `SELECT 1` using the API's database
+credentials, local API health, desktop configuration, DNS, HTTPS health with
+certificate verification, and the application HTML page. Database credentials
+are never printed. It does not restart anything or change clinic data. Exit
+code `0` means all checks passed; `1` means at least one check failed.
+
+On an additional workstation, run the same script with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\Test-NetDentyReadiness.ps1 -WorkstationOnly
+```
+
+This skips server-local processes, files, tasks, and database credentials and
+checks the workstation's configured connection. For a custom server install
+location, supply `-InstallRoot "D:\NetDenty\Server"` on the server.
+
+The **Try connect** button retries the connection; it does not itself open the
+login page. The desktop first requests the configured server's `/health` with
+a 1.5-second timeout per attempt, retrying for approximately 12 seconds. The
+API health endpoint performs a database query before returning `status: "ok"`.
+After success, the desktop loads the server's application page. A failure in
+either step can leave the connection page visible.
+
+Investigate results in this order:
+
+1. **Node/process or API task fails:** confirm the task launches
+   `runtime\node.exe` with `runtime\api\server.mjs` and uses
+   `runtime\api` as its working directory. A running unrelated `node.exe`
+   does not prove NetDenty is running.
+2. **Database query fails:** investigate PostgreSQL and the protected API
+   `.env` configuration. A listening database port alone does not prove the
+   configured username/password/database works.
+3. **Local health passes, configured HTTPS fails:** investigate the server
+   name, port 443, Caddy task/log, firewall, and installed clinic certificate.
+   Run the workstation check on the affected workstation as well.
+4. **Desktop configuration fails:** rerun the complete workstation kit. The
+   server laptop also uses `DESKTOP_MODE=REMOTE` with its own HTTPS address.
+   `C:\ProgramData\NetDenty\desktop.env` takes precedence over
+   `%APPDATA%\Dental Clinic\desktop.env`. Fully close and reopen NetDenty
+   after configuration changes; Try connect does not reload the environment.
+5. **Health passes but application page fails:** inspect `WEB_DIST` and the
+   complete `runtime\web` release. Health does not validate web assets.
+6. **Everything passes but the desktop stays on Try connect:** check the
+   reported health duration against the desktop's 1500 ms timeout. Open the
+   configured HTTPS address in a browser on the affected computer and inspect
+   failed JavaScript/CSS requests if the page is blank. The script checks HTML,
+   not JavaScript execution, every web asset, login credentials, or all app
+   features. Fully quit and reopen the current NetDenty release, then retry.
+   Process-level environment overrides or an older installed release can also
+   differ from the configuration file inspected by this script.
+
+Passing checks describe the computer and account where the script ran;
+PowerShell and Electron can still differ in proxy/network behavior. Keep the
+failed check names and the diagnostic ZIP below for support. A specific cause
+cannot be confirmed without results from the affected installation.
+
 Start with the diagnostic collector. It records tasks, services, listening
 ports, health checks, certificates, configuration keys with values redacted,
 and recent installer/Caddy logs:
@@ -316,6 +458,19 @@ It creates `NetDenty-diagnostics-<date>.zip` on the desktop. The script does
 not include `DATABASE_URL` or passwords. Review the ZIP before sending it.
 
 ### Installer stopped or returned an exit code
+
+If an older installer stays at **Using the installed PostgreSQL instance**
+while PostgreSQL is accepting connections, its console password prompt may be
+hidden by the graphical installer. Current source collects the existing
+PostgreSQL `postgres` password on a dedicated installer options page before
+installation starts; it does not request it from a child PowerShell window. This is the
+PostgreSQL password chosen when that database server was installed, not the
+NetDenty login password. A required missing password stops setup explicitly
+instead of waiting for an invisible prompt.
+Use a rebuilt server installer containing this fix. Do not start another setup
+while the old setup process is still running, and do not uninstall PostgreSQL.
+Temporary installer folders may be deleted when setup closes; do not rely on
+running a script from those folders after cancellation.
 
 Read:
 
@@ -395,6 +550,14 @@ Confirm pgAdmin is running on the server laptop and use `127.0.0.1`, port
 generated password again rather than using the NetDenty login password.
 
 ### Login is rejected
+
+For `npm run dev` on a computer that also runs the installed server, the
+development launcher uses port **4311** and an isolated profile. The installed
+server keeps port **4310**. Older development launches could connect to the
+installed API through HTTP while that API required its HTTPS origin, causing
+**This action is not allowed** at login. Close the old development window and
+restart `npm run dev` after updating the source. Do not disable origin checks
+or change the installed server's HTTPS configuration to solve this conflict.
 
 The initial username is `administrator`. Its password is the value entered in
 the server setup, not the PostgreSQL password. Password hashes cannot be

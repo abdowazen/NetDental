@@ -5,6 +5,7 @@ describe("supplies and materials validation", () => {
   const item = {
     name: "Composite resin",
     brand: "DentalCo",
+    unitId: 1,
     supplierIds: [12, 18, 12],
     openingBalance: "2.5",
     defaultPrice: "18",
@@ -25,6 +26,14 @@ describe("supplies and materials validation", () => {
   it("allows an item without a supplier or expiry date", () => {
     expect(supplyItemSchema.parse({ ...item, supplierIds: [], expiryDate: "" }).supplierIds).toEqual([]);
     expect(supplyItemSchema.parse({ ...item, openingBalance: "" }).openingBalance).toBe("0.000");
+  });
+
+  it("defaults older requests to pieces and rejects invalid unit identifiers", () => {
+    const { unitId: _unitId, ...legacy } = item;
+    expect(supplyItemSchema.parse(legacy).unitId).toBe(1);
+    for (const unitId of [0, -1, 1.5, "1"]) {
+      expect(supplyItemSchema.safeParse({ ...item, unitId }).success).toBe(false);
+    }
   });
 
   it("rejects an expiry date before the item date and invalid numeric precision", () => {

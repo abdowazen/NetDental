@@ -15,9 +15,10 @@ const CONFIRMATION = includeConfiguration
   ? "RESET ALL NETDENTY DATA"
   : "RESET NETDENTY OPERATIONAL DATA";
 const preservedTables = includeConfiguration
-  ? ["_prisma_migrations"]
+  ? ["_prisma_migrations", "Unit"]
   : [
       "_prisma_migrations",
+      "Unit",
       "User",
       "Clinic",
       "SurgicalRoom",

@@ -1,4 +1,10 @@
 {
+  "downloadDiagnostics": "Download diagnostic log",
+  "collectingDiagnostics": "Checking components...",
+  "diagnosticsSaved": "Diagnostic log saved.",
+  "diagnosticsCancelled": "Save cancelled.",
+  "diagnosticsFailed": "Could not save the diagnostic log. Please try again.",
+  "supplyUnit": "Unit",
   "appName": "NetDenty",
   "brandDescriptor": "Dental Practice",
   "planSubtotal": "Subtotal",

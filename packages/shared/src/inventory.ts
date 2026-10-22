@@ -16,6 +16,7 @@ const optionalDateSchema = z.union([z.literal(""), rateDateSchema]);
 export const supplyItemSchema = z.object({
   name: z.string().trim().min(1, "fieldRequired").max(150, "fieldTooLong"),
   brand: z.string().trim().min(1, "fieldRequired").max(100, "fieldTooLong"),
+  unitId: z.number().int().positive().default(1),
   supplierIds: z.array(z.number().int().positive()).max(100).default([]).transform((value) => [...new Set(value)]),
   openingBalance: optionalOpeningBalanceSchema,
   defaultPrice: priceSchema,
@@ -29,6 +30,8 @@ export type SupplyItemInput = z.infer<typeof supplyItemSchema>;
 export type SupplyItem = SupplyItemInput & {
   id: number;
   productId: number;
+  unitName: string;
+  unitSymbol: string;
   supplierNames: string[];
   currency: Currency;
   currentQuantity: string;
@@ -48,6 +51,7 @@ export const inventoryOptionSearchSchema = z.object({ q: z.string().trim().max(1
 export type SupplierOption = { id: number; name: string };
 export type SupplierOptionList = { suppliers: SupplierOption[] };
 export type BrandOptionList = { brands: string[] };
+export type UnitOptionList = { units: { id: number; name: string; symbol: string }[] };
 export type ProductOptionList = { products: { id: number; name: string }[] };
 
 export const supplierSchema = z.object({

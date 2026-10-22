@@ -1,4 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
+contextBridge.exposeInMainWorld("netDentyDiagnostics", {
+  save: () => ipcRenderer.invoke("connection:diagnostics"),
+});
 contextBridge.exposeInMainWorld("clinicConnection", {
   retry: () => ipcRenderer.invoke("connection:retry"),
   language: (language: "en" | "fr") =>

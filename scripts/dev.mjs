@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import electron from "electron";
-const env = { ...process.env };
-delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(electron, ["apps/desktop/dist/main.cjs"], {
+import "dotenv/config";
+import { developmentEnvironment } from "./dev-environment.mjs";
+const env = developmentEnvironment(process.env);
+const child = spawn(electron, ["apps/desktop/dist/main.cjs", `--user-data-dir=${resolve(".runtime/dev-profile")}`], {
   stdio: "inherit",
   env,
 });

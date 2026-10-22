@@ -76,9 +76,6 @@ model CurrencySettings {
   id Int @id @default(1)
   baseCurrency Currency @default(USD)
   updatedAt DateTime @updatedAt
-  @@index([roomId, fullName, id])
-  @@index([roomId, phone, id])
-  @@index([roomId, firstVisit, id])
 }
 
 model ExchangeRate {
@@ -114,6 +111,9 @@ model Patient {
   notes String @default("") @db.VarChar(4000)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@index([roomId, fullName, id])
+  @@index([roomId, phone, id])
+  @@index([roomId, firstVisit, id])
 }
 
 model Clinic {
@@ -210,6 +210,13 @@ model SupplyProduct {
   @@index([roomId, name])
 }
 
+model Unit {
+  id Int @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+  symbol String @db.VarChar(30)
+  items SupplyItem[]
+}
+
 model SupplyItem {
   id Int @id @default(autoincrement())
   roomId Int
@@ -218,6 +225,8 @@ model SupplyItem {
   product SupplyProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
   name String @db.VarChar(150)
   brand String @db.VarChar(100)
+  unitId Int @default(1)
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Restrict)
   suppliers SupplyItemSupplier[]
   openingBalance Decimal @default(0) @db.Decimal(18, 3)
   defaultPrice Decimal @db.Decimal(18, 2)

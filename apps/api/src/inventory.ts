@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   BrandOptionList,
+  UnitOptionList,
   ProductOptionList,
   SupplierOptionList,
   Supplier,
@@ -14,7 +15,7 @@ import type {
 } from "@clinic/shared";
 import { AccessError } from "./access.js";
 
-const includeItem = { product: { select: { id: true, name: true } }, suppliers: { include: { supplier: { select: { id: true, name: true } } }, orderBy: { supplier: { name: "asc" as const } } } } as const;
+const includeItem = { unit: true, product: { select: { id: true, name: true } }, suppliers: { include: { supplier: { select: { id: true, name: true } } }, orderBy: { supplier: { name: "asc" as const } } } } as const;
 type SupplyRow = Prisma.SupplyItemGetPayload<{ include: typeof includeItem }>;
 const supplierInclude = { _count: { select: { supplyItemLinks: true } } } as const;
 type SupplierRow = Prisma.SupplierGetPayload<{ include: typeof supplierInclude }>;
@@ -29,6 +30,9 @@ function publicItem(row: SupplyRow): SupplyItem {
     productId: row.productId,
     name: row.product.name,
     brand: row.brand,
+    unitId: row.unitId,
+    unitName: row.unit.name,
+    unitSymbol: row.unit.symbol,
     supplierIds: row.suppliers.map((link) => link.supplierId),
     supplierNames: row.suppliers.map((link) => link.supplier.name),
     openingBalance: row.openingBalance.toFixed(3),
@@ -41,6 +45,7 @@ function publicItem(row: SupplyRow): SupplyItem {
 }
 
 export interface InventoryStore {
+  listUnits(): Promise<UnitOptionList>;
   searchSupplyItems(input: SupplyItemSearch, roomId: number): Promise<SupplyItemList>;
   findSupplyItem(id: number, roomId: number): Promise<SupplyItem | null>;
   createSupplyItem(input: SupplyItemInput, roomId: number): Promise<SupplyItem>;
@@ -58,6 +63,7 @@ export interface InventoryStore {
 
 export function inventoryStore(db: PrismaClient): InventoryStore {
   async function productAndSuppliers(client: Prisma.TransactionClient, input: SupplyItemInput, roomId: number) {
+    if (!await client.unit.findUnique({ where: { id: input.unitId } })) throw new AccessError("VALIDATION_ERROR");
     const product = await client.supplyProduct.findFirst({ where: { roomId, name: { equals: input.name, mode: "insensitive" } } })
       ?? await client.supplyProduct.create({ data: { roomId, name: input.name } });
     const supplierCount = input.supplierIds.length ? await client.supplier.count({ where: { id: { in: input.supplierIds }, roomId, active: true } }) : 0;
@@ -68,6 +74,7 @@ export function inventoryStore(db: PrismaClient): InventoryStore {
     return {
       name: productName,
       brand: input.brand,
+      unitId: input.unitId,
       productId,
       defaultPrice: input.defaultPrice,
       currency: input.currency,
@@ -76,6 +83,9 @@ export function inventoryStore(db: PrismaClient): InventoryStore {
     };
   }
   return {
+    async listUnits() {
+      return { units: await db.unit.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, symbol: true } }) };
+    },
     async searchSupplyItems({ q, page, pageSize, sort, direction }, roomId) {
       const where: Prisma.SupplyItemWhereInput = {
         roomId,

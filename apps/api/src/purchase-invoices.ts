@@ -7,7 +7,7 @@ import {
 } from "@clinic/shared";
 import { AccessError } from "./access.js";
 
-const invoiceInclude = { lines: { orderBy: { id: "asc" as const } } } as const;
+const invoiceInclude = { lines: { include: { item: { include: { unit: true } } }, orderBy: { id: "asc" as const } } } as const;
 type InvoiceRow = Prisma.PurchaseInvoiceGetPayload<{ include: typeof invoiceInclude }>;
 type Db = PrismaClient | Prisma.TransactionClient;
 const day = (value: Date) => value.toISOString().slice(0, 10);
@@ -38,7 +38,7 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
     return { id: row.id, invoiceNumber: `INV-${String(row.id).padStart(6, "0")}`, supplierId: row.supplierId, supplierName: row.supplierName,
       paymentType: row.paymentType as PurchaseInvoice["paymentType"], currency: row.currency, totalAmount: row.totalAmount.toFixed(2), baseCurrency: base,
       baseTotal, lbpPerUsd: row.lbpPerUsd?.toFixed() ?? null, date: day(row.date), note: row.note, actorId: row.actorId, createdAt: row.createdAt.toISOString(),
-      lines: row.lines.map((line) => ({ id: line.id, itemId: line.itemId, itemName: line.itemName, brand: line.brand,
+      lines: row.lines.map((line) => ({ id: line.id, itemId: line.itemId, itemName: line.itemName, brand: line.brand, unitName: line.item.unit.name, unitSymbol: line.item.unit.symbol,
         defaultPrice: line.defaultPrice.toFixed(2), purchasePrice: line.purchasePrice.toFixed(2),
         quantity: line.quantity.toFixed(3), expiryDate: line.expiryDate ? day(line.expiryDate) : "", description: line.description, lineTotal: line.lineTotal.toFixed(2) })) };
   }
@@ -98,7 +98,7 @@ export function purchaseInvoiceStore(db: PrismaClient): PurchaseInvoiceStore {
           date: new Date(`${input.date}T00:00:00Z`), note: input.note, lines: { create: value.lines } }, include: invoiceInclude }); return publicInvoice(row, value.base); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     },
     async deletePurchaseInvoice(id, roomId) { return db.$transaction(async (tx) => { const row = await tx.purchaseInvoice.findFirst({ where: { id, roomId }, include: invoiceInclude }); if (!row) return false; await adjustStock(tx, row.lines, []); await tx.purchaseInvoice.delete({ where: { id } }); return true; }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); },
-    async purchaseProducts(supplierId, roomId, date) { const [rows, effectiveRate] = await Promise.all([db.supplyItem.findMany({ where: { roomId, suppliers: { some: { supplierId } } }, include: { product: { select: { name: true } } }, orderBy: [{ name: "asc" }, { brand: "asc" }] }), rate(db, roomId, date)]); return { products: rows.map((item) => ({ id: item.id, productId: item.productId, name: item.product.name, brand: item.brand, defaultPrice: item.defaultPrice.toFixed(2), currency: item.currency, expiryDate: item.expiryDate ? day(item.expiryDate) : "", currentQuantity: item.currentQuantity.toFixed(3) })), effectiveRate }; },
+    async purchaseProducts(supplierId, roomId, date) { const [rows, effectiveRate] = await Promise.all([db.supplyItem.findMany({ where: { roomId, suppliers: { some: { supplierId } } }, include: { product: { select: { name: true } }, unit: true }, orderBy: [{ name: "asc" }, { brand: "asc" }] }), rate(db, roomId, date)]); return { products: rows.map((item) => ({ id: item.id, productId: item.productId, name: item.product.name, brand: item.brand, unitName: item.unit.name, unitSymbol: item.unit.symbol, defaultPrice: item.defaultPrice.toFixed(2), currency: item.currency, expiryDate: item.expiryDate ? day(item.expiryDate) : "", currentQuantity: item.currentQuantity.toFixed(3) })), effectiveRate }; },
     async getInventoryAnalytics(input, roomId) {
       const base = await baseCurrency(db, roomId);
       const whereFor = (from: string, to: string): Prisma.PurchaseInvoiceWhereInput => ({ roomId,

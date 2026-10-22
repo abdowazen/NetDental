@@ -31,9 +31,9 @@ npm run dentist:create
 npm run dev
 ```
 
-The creation command prompts for a username, display name and hidden password (minimum 12 characters), with confirmation. It never overwrites users. `npm run dev` builds the workspaces and starts Electron, which starts its own API in LOCAL mode. PostgreSQL must already be running. Re-run this command after source changes.
+The creation command prompts for a username, display name and hidden password (minimum 12 characters), with confirmation. It never overwrites users. `npm run dev` builds the workspaces and starts Electron, which starts its own API in LOCAL mode at `http://127.0.0.1:4311`. The launcher aligns the API origin and HTTP cookie settings and uses an isolated `.runtime/dev-profile` so it can coexist with the installed server on port 4310. Set `NETDENTY_DEV_PORT` to another free port if needed. PostgreSQL must already be running. Re-run this command after source changes. Database access still uses the project `.env`; a separate development database is recommended.
 
-For browser hot reload, run `npm run api:start` and `npm run dev:web` in separate terminals, with `APP_ORIGIN=http://127.0.0.1:5173` in the API environment. Open `http://127.0.0.1:5173`; Vite proxies API requests. Restore `APP_ORIGIN=http://127.0.0.1:4310` before desktop use. Hot reload is an optional browser workflow, not required for desktop startup.
+For browser hot reload, run `npm run api:start` and `npm run dev:web` in separate terminals, with `APP_ORIGIN=http://127.0.0.1:5173` in the API environment. Open `http://127.0.0.1:5173`; Vite proxies API requests to port 4310, which must be available for this separate workflow. The desktop development launcher sets its own origin and port. Hot reload is an optional browser workflow, not required for desktop startup.
 
 ## Configuration
 

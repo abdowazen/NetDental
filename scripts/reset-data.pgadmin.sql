@@ -66,7 +66,7 @@ BEGIN
   INTO tables_to_truncate
   FROM pg_tables
   WHERE schemaname = 'public'
-    AND tablename <> '_prisma_migrations'
+    AND tablename NOT IN ('_prisma_migrations', 'Unit')
     AND (
       include_configuration
       OR tablename NOT IN (

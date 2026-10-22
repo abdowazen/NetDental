@@ -81,8 +81,11 @@ Var AdminPassword
 Var ClinicNameInput
 Var AdminPasswordInput
 Var ShowPasswordCheck
+Var PostgresPassword
+Var PostgresPasswordInput
 
 Page custom ServerOptionsPage ServerOptionsLeave
+Page custom PostgresOptionsPage PostgresOptionsLeave
 Page instfiles
 
 Function .onInit
@@ -145,6 +148,29 @@ Function ServerOptionsLeave
   \${EndIf}
 FunctionEnd
 
+Function PostgresOptionsPage
+  nsDialogs::Create 1018
+  Pop $0
+  \${If} $0 == error
+    Abort
+  \${EndIf}
+  \${NSD_CreateLabel} 0 0 100% 24u "Existing PostgreSQL installation"
+  Pop $0
+  \${NSD_CreateLabel} 0 30u 100% 42u "If PostgreSQL is already installed, enter its postgres account password below. This is different from the NetDenty administrator password."
+  Pop $0
+  \${NSD_CreateLabel} 0 80u 100% 12u "Existing PostgreSQL postgres password"
+  Pop $0
+  \${NSD_CreatePassword} 0 96u 100% 13u ""
+  Pop $PostgresPasswordInput
+  \${NSD_CreateLabel} 0 124u 100% 40u "Leave blank for a new PostgreSQL installation or a NetDenty upgrade with saved database credentials. If required but missing, setup will stop with an error."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function PostgresOptionsLeave
+  \${NSD_GetText} $PostgresPasswordInput $PostgresPassword
+FunctionEnd
+
 Section "Install"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
@@ -153,11 +179,16 @@ Section "Install"
   DetailPrint "Starting NetDenty server setup..."
   System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_CLINIC_NAME", "$ClinicName").r1'
   System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_ADMIN_PASSWORD", "$AdminPassword").r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_POSTGRES_PASSWORD", "$PostgresPassword").r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, t) i("NETDENTY_INSTALL_NONINTERACTIVE", "1").r1'
   nsExec::ExecToLog '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\\Install-NetDentyServer.ps1"'
   Pop $0
   System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_ADMIN_PASSWORD", 0).r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_POSTGRES_PASSWORD", 0).r1'
+  System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_NONINTERACTIVE", 0).r1'
   System::Call 'Kernel32::SetEnvironmentVariable(t, i) i("NETDENTY_INSTALL_CLINIC_NAME", 0).r1'
   StrCpy $AdminPassword ""
+  StrCpy $PostgresPassword ""
   IntCmp $0 0 completed failed failed
 failed:
   MessageBox MB_ICONSTOP "NetDenty server setup failed with exit code $0. See C:\\ProgramData\\NetDenty\\Server\\logs\\install.log for details."

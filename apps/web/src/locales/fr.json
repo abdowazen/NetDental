@@ -1,4 +1,10 @@
 {
+  "downloadDiagnostics": "Télécharger le journal de diagnostic",
+  "collectingDiagnostics": "Vérification des composants...",
+  "diagnosticsSaved": "Journal de diagnostic enregistré.",
+  "diagnosticsCancelled": "Enregistrement annulé.",
+  "diagnosticsFailed": "Impossible de sauvegarder le diagnostic. Réessayez.",
+  "supplyUnit": "Unité",
   "appName": "NetDenty",
   "brandDescriptor": "Cabinet dentaire",
   "planSubtotal": "Sous-total",

@@ -5,6 +5,7 @@ type State = {
 };
 declare global {
   interface Window {
+    netDentyDiagnostics: { save(): Promise<{ status: string }> };
     clinicConnection: {
       state(): Promise<State>;
       language(value: "en" | "fr"): Promise<State>;
@@ -25,6 +26,7 @@ function render(failed: boolean) {
     state.strings[failed ? "connectionDescription" : "connectingDescription"];
   button.textContent = state.strings.retry;
   button.disabled = !failed;
+  element("diagnostics").textContent = state.strings.downloadDiagnostics;
   element("language-label").textContent = state.strings.language;
   (element("language") as HTMLSelectElement).value = state.language;
 }
@@ -39,6 +41,16 @@ window.clinicConnection.onState((value) => {
 button.onclick = async () => {
   render(false);
   await window.clinicConnection.retry();
+};
+const diagnosticButton = element("diagnostics") as HTMLButtonElement;
+diagnosticButton.onclick = async () => {
+  diagnosticButton.disabled = true;
+  element("diagnostic-status").textContent = state.strings.collectingDiagnostics;
+  try {
+    const result = await window.netDentyDiagnostics.save();
+    element("diagnostic-status").textContent = state.strings[result.status === "saved" ? "diagnosticsSaved" : result.status === "cancelled" ? "diagnosticsCancelled" : "diagnosticsFailed"];
+  } catch { element("diagnostic-status").textContent = state.strings.diagnosticsFailed; }
+  finally { diagnosticButton.disabled = false; }
 };
 element("language").onchange = async (event) => {
   state = await window.clinicConnection.language(

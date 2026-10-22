@@ -46,10 +46,50 @@ function New-DeploymentPassword {
 }
 
 function Read-PlainPassword([string]$Prompt) {
-  $secure = Read-Host $Prompt -AsSecureString
-  $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-  try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
-  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+  if ($env:NETDENTY_INSTALL_NONINTERACTIVE -eq '1') {
+    throw 'A required password was not supplied on the installer options pages. Restart setup and enter the password there.'
+  }
+  # NSIS captures console output with nsExec::ExecToLog, so Read-Host has no
+  # visible interactive console. Use an explicit masked dialog instead.
+  Add-Type -AssemblyName System.Windows.Forms
+  $form = New-Object System.Windows.Forms.Form
+  try {
+    $form.Text = 'NetDenty Server Setup - Password required'
+    $form.Width = 540
+    $form.Height = 200
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+    $label = New-Object System.Windows.Forms.Label
+    $label.SetBounds(16, 16, 490, 40)
+    $label.Text = $Prompt
+    $inputBox = New-Object System.Windows.Forms.TextBox
+    $inputBox.SetBounds(16, 62, 490, 24)
+    $inputBox.UseSystemPasswordChar = $true
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = 'Continue'
+    $ok.SetBounds(316, 108, 90, 28)
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'Cancel'
+    $cancel.SetBounds(416, 108, 90, 28)
+    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $form.Controls.AddRange(@($label, $inputBox, $ok, $cancel))
+    $form.AcceptButton = $ok
+    $form.CancelButton = $cancel
+    $form.Add_Shown({ $inputBox.Focus() })
+    Write-Host 'Waiting for password in the NetDenty Server Setup dialog...'
+    if ($form.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+      throw 'Password entry cancelled. Setup cannot continue.'
+    }
+    if (-not $inputBox.Text) { throw 'A password is required.' }
+    return $inputBox.Text
+  } finally {
+    if ($inputBox) { $inputBox.Clear() }
+    $form.Dispose()
+  }
 }
 
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments, [string]$FailureMessage) {
@@ -151,6 +191,23 @@ try {
       }
     }
   }
+  # Stop the installed server before replacing node.exe/caddy.exe. Do not stop
+  # development Electron or unrelated Node processes on this same computer.
+  foreach ($taskName in @($apiTaskName, $proxyTaskName)) {
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+      Stop-ScheduledTask -TaskName $taskName
+    }
+  }
+  $installedExecutables = @((Join-Path $runtimeRoot 'node.exe'), (Join-Path $runtimeRoot 'caddy.exe'))
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe' OR Name = 'caddy.exe'" |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath -in $installedExecutables } |
+    ForEach-Object {
+      $runningProcess = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+      if ($runningProcess) {
+        Stop-Process -InputObject $runningProcess -Force
+        if (-not $runningProcess.WaitForExit(10000)) { throw 'Installed server process did not exit before runtime replacement.' }
+      }
+    }
   if (Test-Path -LiteralPath $runtimeRoot) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force }
   Copy-Item -LiteralPath (Join-Path $staging "runtime") -Destination $runtimeRoot -Recurse -Force
 
@@ -197,7 +254,11 @@ try {
       $postgresSuperPassword = Get-Content -Raw -LiteralPath $postgresBootstrapSecret
       Write-Host "Continuing the previous NetDenty PostgreSQL setup attempt."
     } else {
-      $postgresSuperPassword = Read-PlainPassword "Enter the existing PostgreSQL postgres-account password"
+      if ($env:NETDENTY_INSTALL_POSTGRES_PASSWORD) {
+        $postgresSuperPassword = $env:NETDENTY_INSTALL_POSTGRES_PASSWORD
+      } else {
+        $postgresSuperPassword = Read-PlainPassword "Enter the existing PostgreSQL postgres-account password"
+      }
     }
   }
 
@@ -440,7 +501,7 @@ try {
   $dbPassword = $null
   $postgresSuperPassword = $null
   $existingDatabaseUrl = $null
-  Remove-Item Env:NETDENTY_INSTALL_ADMIN_PASSWORD, Env:NETDENTY_INSTALL_CLINIC_NAME -ErrorAction SilentlyContinue
+  Remove-Item Env:NETDENTY_INSTALL_ADMIN_PASSWORD, Env:NETDENTY_INSTALL_CLINIC_NAME, Env:NETDENTY_INSTALL_POSTGRES_PASSWORD, Env:NETDENTY_INSTALL_NONINTERACTIVE -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
   if ($transcriptStarted) { try { Stop-Transcript | Out-Null } catch { } }
 }

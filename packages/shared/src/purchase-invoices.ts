@@ -25,7 +25,7 @@ export const purchaseInvoiceSchema = z.object({
 });
 export type PurchaseInvoiceInput = z.infer<typeof purchaseInvoiceSchema>;
 export type PurchaseInvoiceLine = PurchaseInvoiceInput["lines"][number] & {
-  id: number; itemName: string; brand: string; defaultPrice: string; lineTotal: string;
+  id: number; itemName: string; brand: string; unitName: string; unitSymbol: string; defaultPrice: string; lineTotal: string;
 };
 export type PurchaseInvoice = Omit<PurchaseInvoiceInput, "lines"> & {
   id: number; invoiceNumber: string; supplierName: string; totalAmount: string; baseCurrency: Currency;
@@ -40,5 +40,5 @@ export const purchaseInvoiceSearchSchema = z.object({
 }).strict().refine((value) => !value.from || !value.to || value.to >= value.from, { path: ["to"], message: "billExpenseDateInvalid" });
 export type PurchaseInvoiceSearch = z.infer<typeof purchaseInvoiceSearchSchema>;
 export type PurchaseInvoiceList = { invoices: PurchaseInvoice[]; total: number; baseCurrency: Currency; totalBaseAmount: string };
-export type PurchaseProductOption = { id: number; productId: number; name: string; brand: string; defaultPrice: string; currency: Currency; expiryDate: string; currentQuantity: string };
+export type PurchaseProductOption = { id: number; productId: number; name: string; brand: string; unitName: string; unitSymbol: string; defaultPrice: string; currency: Currency; expiryDate: string; currentQuantity: string };
 export type PurchaseProductOptionList = { products: PurchaseProductOption[]; effectiveRate: ExchangeRate | null };

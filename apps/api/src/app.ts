@@ -617,6 +617,10 @@ export async function buildApp(store: Store, config: Config) {
     const { q } = inventoryOptionSearchSchema.parse(req.query);
     return store.searchBrandOptions(q, roomId);
   });
+  app.get("/api/supplies/units", async (req) => {
+    await scoped(req, "suppliesMaterials", "view");
+    return store.listUnits();
+  });
   app.get("/api/supplies/products", async (req) => {
     const roomId = await scoped(req, "suppliesMaterials", "view");
     const { q } = inventoryOptionSearchSchema.parse(req.query);

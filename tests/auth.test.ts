@@ -25,6 +25,7 @@ const sessions = new Map<string, Session>();
 let passwordHash = "";
 const password = "test-only-long-password";
 const store: Store = {
+  async listUnits() { return { units: [{ id: 1, name: "Piece", symbol: "pc" }] }; },
   async searchBillExpenses() { return { expenses: [], total: 0, baseCurrency: "USD", totalBaseAmount: "0.00" }; },
   async findBillExpense() { return null; },
   async createBillExpense() { throw new Error("Unused test method"); },
@@ -163,6 +164,7 @@ const store: Store = {
       ...data,
       id: randomUUID(),
       role: "DENTIST",
+      defaultPage: "automatic",
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -231,6 +233,15 @@ const login = (payload = { username: "Dentist", password }) =>
 const cookieOf = (r: { headers: Record<string, unknown> }) =>
   String(r.headers["set-cookie"]).split(";")[0];
 describe("session authentication", () => {
+  it("protects the units LOV and returns database options for authenticated inventory users", async () => {
+    expect((await app.inject({ url: "/api/supplies/units" })).statusCode).toBe(401);
+    const token = "a".repeat(64);
+    await store.createSession({ userId: [...users.keys()][0], tokenHash: digest(token), expiresAt: new Date(Date.now() + 60000) });
+    const cookie = `clinic_session=${token}`;
+    const response = await app.inject({ url: "/api/supplies/units", headers: { cookie } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({ units: [{ id: 1, name: "Piece", symbol: "pc" }] });
+  });
   it("protects every patient endpoint and validates required fields and read-only IDs", async () => {
     for (const method of ["GET", "POST", "PUT", "DELETE"] as const) {
       const url =

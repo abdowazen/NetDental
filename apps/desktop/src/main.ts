@@ -11,6 +11,7 @@ import {
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { config as dotenv } from "dotenv";
+import { collectDiagnostics } from "./diagnostics";
 let window: BrowserWindow | null = null;
 let ownedApi: UtilityProcess | null = null;
 let connecting = false;
@@ -19,6 +20,8 @@ let mode = "LOCAL";
 let language: "en" | "fr" = "en";
 let configValid = true;
 let failure = false;
+let lastApiExit: number | null = null;
+let diagnosticBusy = false;
 const fallbackFile = join(__dirname, "connection.html");
 app.setName("NetDenty");
 // Keep the existing profile location so upgrades retain configuration and preferences.
@@ -72,7 +75,8 @@ function startApi() {
   child.stdout?.resume();
   child.stderr?.resume();
   // Intentionally do not pipe child logs containing operational details into renderer.
-  child.on("exit", () => {
+  child.on("exit", (code) => {
+    lastApiExit = code;
     if (ownedApi === child) ownedApi = null;
   });
 }
@@ -239,6 +243,29 @@ else {
     ipcMain.handle("connection:retry", (event) => {
       if (!allowed(event)) throw new Error("Forbidden");
       return connect();
+    });
+    ipcMain.handle("connection:diagnostics", async (event) => {
+      if (!allowed(event) && !allowedApplication(event)) throw new Error("Forbidden");
+      if (diagnosticBusy) return { status: "busy" };
+      diagnosticBusy = true;
+      try {
+        const report = await collectDiagnostics({
+          target, mode, valid: configValid, packaged: app.isPackaged,
+          apiRoot: app.isPackaged ? join(process.resourcesPath, "api") : resolve("apps/api"),
+          envFile: app.isPackaged ? join(process.resourcesPath, "api/.env") : resolve(".env"),
+          node: process.execPath, apiOwned: Boolean(ownedApi), startupCode: lastApiExit,
+          fetch: (url) => net.fetch(url, { signal: AbortSignal.timeout(8000), redirect: "error" }),
+        });
+        const selection = await dialog.showSaveDialog(window!, {
+          title: "Save NetDenty diagnostic log",
+          defaultPath: `NetDenty-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`,
+          filters: [{ name: "Diagnostic log", extensions: ["txt"] }],
+        });
+        if (selection.canceled || !selection.filePath) return { status: "cancelled" };
+        writeFileSync(selection.filePath, report, "utf8");
+        return { status: "saved" };
+      } catch { return { status: "error" }; }
+      finally { diagnosticBusy = false; }
     });
     ipcMain.handle("backup:save", async (event, bytes: Uint8Array, suggestedName: string) => {
       if (!allowedApplication(event) || !(bytes instanceof Uint8Array)) throw new Error("Forbidden");
